@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from shutil import copy2, rmtree
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Set, Union
 from zipfile import ZipFile
 
 PYTHON_VERSION = "3.6"
@@ -86,18 +86,22 @@ def build_package(
 
                 subprocess.run(("virtualenv", "--clear", f"--python={python}", env))
 
-                # Debian-based distros put packages in dist-packages, on linux there
-                # may be a separate lib64 directory.
+                # Debian-based distros put packages in dist-packages,
+                # on linux there may be a separate lib64 directory.
                 package_directories = {
                     env / lib / python / packages
                     for lib in ("lib", "lib64")
                     for packages in ("site-packages", "dist-packages")
                 }
 
-                # package directories will have some additional files in them
-                # (e.g, pip) that don't need to be copied into our package. To
-                # filter them out we touch all of the already-existing files and
-                # then will only grab newer files.
+                # Apparently packages can also go here on our CI system
+                base_directories = {env / lib / python for lib in ("lib", "lib64")}
+
+                # package directories will have some additional files in
+                # them (e.g, pip) that don't need to be copied into our
+                # package. To filter them out we touch all of the
+                # already-existing files and then will only grab newer
+                # files.
                 for directory in package_directories:
                     if directory.exists():
                         subprocess.run(
@@ -115,6 +119,12 @@ def build_package(
                             )
                         )
 
+                # we aren't allowed to backdate the mtime of files in
+                # these directories, so hope we don't run into issues.
+                for directory in base_directories:
+                    if directory.exists():
+                        subprocess.run(("touch", str(directory)))
+
                 # It's easiest to have a sentinal file so we can just say
                 # `-newer build_info` as a find filter later on.
                 subprocess.run(("touch", "-t", time, str(build_info)))
@@ -123,6 +133,7 @@ def build_package(
                     pip = env / "bin" / "pip"
                     subprocess.run((pip, "install", "-r", *map(str, requirements)))
 
+                paths: Set[Path] = set()
                 for directory in package_directories:
                     if directory.exists():
                         result = subprocess.run(
@@ -143,22 +154,55 @@ def build_package(
                             stdout=subprocess.PIPE,
                         )
 
-                        paths = {
-                            Path(raw.decode())
-                            for raw in result.stdout.split(b"\n")
-                            if raw
-                        }
+                        paths = paths.union(
+                            {
+                                Path(raw.decode())
+                                for raw in result.stdout.split(b"\n")
+                                if raw
+                            }
+                        )
 
-                        for path in paths:
-                            destination = package / path.name
+                for directory in base_directories:
+                    if directory.exists():
+                        result = subprocess.run(
+                            (
+                                "find",
+                                str(directory),
+                                "-depth",
+                                "1",
+                                "-newer",
+                                str(directory),
+                                "!",
+                                "-path",
+                                str(directory / "__pycache__"),
+                                "!",
+                                "-path",
+                                str(directory / "*.dist-info"),
+                            ),
+                            stdout=subprocess.PIPE,
+                        )
 
-                            if not destination.exists():
-                                if path.is_dir():
-                                    subprocess.run(
-                                        ("cp", "-Rn", f"{path}", str(destination))
-                                    )
-                                else:
-                                    copy2(str(path), str(destination))
+                        paths = paths.union(
+                            {
+                                Path(raw.decode())
+                                for raw in result.stdout.split(b"\n")
+                                if raw
+                            }
+                        )
+
+                for path in paths:
+                    # skip the actual package directories that got added
+                    # because the base directory workaround.
+                    if path in package_directories:
+                        continue
+
+                    destination = package / path.name
+
+                    if not destination.exists():
+                        if path.is_dir():
+                            subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
+                        else:
+                            copy2(str(path), str(destination))
 
             with ZipFile(zipfile, "w") as z:
                 directories = [package]
