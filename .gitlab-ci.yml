@@ -1,0 +1,67 @@
+stages:
+  - test
+  - coverage
+  - docs
+  - deploy
+
+.config_3_6: &config_3_6
+  tags:
+    - docker-ci
+  image: python:3.6
+  before_script:
+    - pip3 install tox
+
+"Test Python 3.6":
+  <<: *config_3_6
+  stage: test
+  script:
+    - tox -re py36
+  artifacts:
+    paths:
+      - .coverage.*
+    expire_in: 24 hours
+
+"Code Format Check":
+  <<: *config_3_6
+  stage: test
+  script:
+    - tox -re check
+
+"Coverage":
+  <<: *config_3_6
+  stage: coverage
+  dependencies:
+    - "Test Python 3.6"
+  script:
+    - tox -re coverage
+  coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+\.\d+%)/'
+  artifacts:
+    paths:
+      - dist/coverage
+    expire_in: 24 hours
+
+"Build Documentation":
+  <<: *config_3_6
+  stage: build_docs
+  script:
+    - tox -re docs
+  artifacts:
+    paths:
+      - dist/docs
+    expire_in: 24 hours
+
+pages:
+  stage: deploy
+  dependencies:
+    - "Coverage"
+    - "Build Documentation"
+  script:
+    - mkdir public
+    - mv dist/coverage public/coverage
+    - mv dist/docs public/docs
+  artifacts:
+    paths:
+      - public
+    expire_in: 24 hours
+  only:
+    - tags
