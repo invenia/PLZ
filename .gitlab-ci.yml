@@ -42,7 +42,7 @@ stages:
 
 "Build Documentation":
   <<: *config_3_6
-  stage: build_docs
+  stage: docs
   script:
     - tox -re docs
   artifacts:
