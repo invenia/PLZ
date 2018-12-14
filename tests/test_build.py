@@ -86,7 +86,7 @@ def test_build():
         requirements.write_text("pg8000==1.11\n")  # last version, should be stable
 
         package = build_package(
-            build, file1, lambda_directory, requirements=[requirements]
+            build, file1, lambda_directory, requirements=requirements
         )
         assert package == build / "package.zip"
 
