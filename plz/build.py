@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from shutil import copy2, rmtree
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Set, Union
 from zipfile import ZipFile
 
 PYTHON_VERSION = "3.6"
@@ -61,7 +61,6 @@ def build_package(
 
         if force or info != old_info:
             python = f"python{version}"
-            time = "190001010000"
             package = build / "package"
 
             build.mkdir(parents=True, exist_ok=True)
@@ -86,38 +85,27 @@ def build_package(
 
                 subprocess.run(("virtualenv", "--clear", f"--python={python}", env))
 
-                # Debian-based distros put packages in dist-packages, on linux there
-                # may be a separate lib64 directory.
+                # Debian-based distros put packages in dist-packages,
+                # on linux there may be a separate lib64 directory.
                 package_directories = {
                     env / lib / python / packages
                     for lib in ("lib", "lib64")
                     for packages in ("site-packages", "dist-packages")
                 }
 
-                # package directories will have some additional files in them
-                # (e.g, pip) that don't need to be copied into our package. To
-                # filter them out we touch all of the already-existing files and
-                # then will only grab newer files.
+                # Apparently packages can also go here on our CI system
+                package_directories = package_directories.union(
+                    {env / lib / python for lib in ("lib", "lib64")}
+                )
+
+                existing: Set[Path] = set()
+
+                # package directories will have some additional files in
+                # them (e.g, pip) that don't need to be copied into our
+                # package.
                 for directory in package_directories:
                     if directory.exists():
-                        subprocess.run(
-                            (
-                                "find",
-                                str(directory),
-                                "-depth",
-                                "1",
-                                "-exec",
-                                "touch",
-                                "-t",
-                                time,
-                                "{}",
-                                ";",
-                            )
-                        )
-
-                # It's easiest to have a sentinal file so we can just say
-                # `-newer build_info` as a find filter later on.
-                subprocess.run(("touch", "-t", time, str(build_info)))
+                        existing = existing.union(directory.iterdir())
 
                 if requirements:
                     pip = env / "bin" / "pip"
@@ -125,31 +113,18 @@ def build_package(
 
                 for directory in package_directories:
                     if directory.exists():
-                        result = subprocess.run(
-                            (
-                                "find",
-                                str(directory),
-                                "-depth",
-                                "1",
-                                "-newer",
-                                str(build_info),
-                                "!",
-                                "-path",
-                                str(directory / "__pycache__"),
-                                "!",
-                                "-path",
-                                str(directory / "*.dist-info"),
-                            ),
-                            stdout=subprocess.PIPE,
-                        )
+                        for path in directory.iterdir():
+                            # Skip things we know we don't need to add.
+                            # These are separate because black and
+                            # flake8 can't agree on where an or should
+                            # go.
+                            if path in package_directories or path in existing:
+                                continue
+                            if path.name == "__pycache__":
+                                continue
+                            if path.suffix == ".dist-info":
+                                continue
 
-                        paths = {
-                            Path(raw.decode())
-                            for raw in result.stdout.split(b"\n")
-                            if raw
-                        }
-
-                        for path in paths:
                             destination = package / path.name
 
                             if not destination.exists():
