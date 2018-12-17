@@ -61,7 +61,6 @@ def build_package(
 
         if force or info != old_info:
             python = f"python{version}"
-            time = "190001010000"
             package = build / "package"
 
             build.mkdir(parents=True, exist_ok=True)
@@ -95,114 +94,46 @@ def build_package(
                 }
 
                 # Apparently packages can also go here on our CI system
-                base_directories = {env / lib / python for lib in ("lib", "lib64")}
+                package_directories = package_directories.union(
+                    {env / lib / python for lib in ("lib", "lib64")}
+                )
+
+                existing: Set[Path] = set()
 
                 # package directories will have some additional files in
                 # them (e.g, pip) that don't need to be copied into our
-                # package. To filter them out we touch all of the
-                # already-existing files and then will only grab newer
-                # files.
+                # package.
                 for directory in package_directories:
                     if directory.exists():
-                        subprocess.run(
-                            (
-                                "find",
-                                str(directory),
-                                "-depth",
-                                "1",
-                                "-exec",
-                                "touch",
-                                "-t",
-                                time,
-                                "{}",
-                                ";",
-                            )
-                        )
-
-                # we aren't allowed to backdate the mtime of files in
-                # these directories, so hope we don't run into issues.
-                for directory in base_directories:
-                    if directory.exists():
-                        subprocess.run(("touch", str(directory)))
-
-                # It's easiest to have a sentinal file so we can just say
-                # `-newer build_info` as a find filter later on.
-                subprocess.run(("touch", "-t", time, str(build_info)))
+                        existing = existing.union(directory.iterdir())
 
                 if requirements:
                     pip = env / "bin" / "pip"
                     subprocess.run((pip, "install", "-r", *map(str, requirements)))
 
-                paths: Set[Path] = set()
                 for directory in package_directories:
                     if directory.exists():
-                        result = subprocess.run(
-                            (
-                                "find",
-                                str(directory),
-                                "-depth",
-                                "1",
-                                "-newer",
-                                str(build_info),
-                                "!",
-                                "-path",
-                                str(directory / "__pycache__"),
-                                "!",
-                                "-path",
-                                str(directory / "*.dist-info"),
-                            ),
-                            stdout=subprocess.PIPE,
-                        )
+                        for path in directory.iterdir():
+                            # Skip things we know we don't need to add.
+                            # These are separate because black and
+                            # flake8 can't agree on where an or should
+                            # go.
+                            if path in package_directories or path in existing:
+                                continue
+                            if path.name == "__pycache__":
+                                continue
+                            if path.suffix == ".dist-info":
+                                continue
 
-                        paths = paths.union(
-                            {
-                                Path(raw.decode())
-                                for raw in result.stdout.split(b"\n")
-                                if raw
-                            }
-                        )
+                            destination = package / path.name
 
-                for directory in base_directories:
-                    if directory.exists():
-                        result = subprocess.run(
-                            (
-                                "find",
-                                str(directory),
-                                "-depth",
-                                "1",
-                                "-newer",
-                                str(directory),
-                                "!",
-                                "-path",
-                                str(directory / "__pycache__"),
-                                "!",
-                                "-path",
-                                str(directory / "*.dist-info"),
-                            ),
-                            stdout=subprocess.PIPE,
-                        )
-
-                        paths = paths.union(
-                            {
-                                Path(raw.decode())
-                                for raw in result.stdout.split(b"\n")
-                                if raw
-                            }
-                        )
-
-                for path in paths:
-                    # skip the actual package directories that got added
-                    # because the base directory workaround.
-                    if path in package_directories:
-                        continue
-
-                    destination = package / path.name
-
-                    if not destination.exists():
-                        if path.is_dir():
-                            subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
-                        else:
-                            copy2(str(path), str(destination))
+                            if not destination.exists():
+                                if path.is_dir():
+                                    subprocess.run(
+                                        ("cp", "-Rn", f"{path}", str(destination))
+                                    )
+                                else:
+                                    copy2(str(path), str(destination))
 
             with ZipFile(zipfile, "w") as z:
                 directories = [package]
