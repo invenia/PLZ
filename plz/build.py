@@ -2,6 +2,7 @@
 Build a package
 """
 import json
+import logging
 import subprocess
 from pathlib import Path
 from shutil import copy2, rmtree
@@ -83,7 +84,17 @@ def build_package(
             if requirements:
                 env = build / "package-env"
 
-                subprocess.run(("virtualenv", "--clear", f"--python={python}", env))
+                process = subprocess.run(
+                    ("virtualenv", "--clear", f"--python={python}", env),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                if process.stdout:
+                    logging.debug(process.stdout)
+
+                if process.stderr:
+                    logging.error(process.stderr)
 
                 # Debian-based distros put packages in dist-packages,
                 # on linux there may be a separate lib64 directory.
@@ -109,9 +120,20 @@ def build_package(
 
                 if requirements:
                     pip = env / "bin" / "pip"
-                    subprocess.run((pip, "install", "-r", *map(str, requirements)))
+                    process = subprocess.run(
+                        (pip, "install", "-r", *map(str, requirements)),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+
+                    if process.stdout:
+                        logging.debug(process.stdout)
+
+                    if process.stderr:
+                        logging.error(process.stderr)
 
                 for directory in package_directories:
+
                     if directory.exists():
                         for path in directory.iterdir():
                             # Skip things we know we don't need to add.
@@ -128,6 +150,7 @@ def build_package(
                             destination = package / path.name
 
                             if not destination.exists():
+                                logging.debug(f"Copying {destination}")
                                 if path.is_dir():
                                     subprocess.run(
                                         ("cp", "-Rn", f"{path}", str(destination))
@@ -146,7 +169,9 @@ def build_package(
                             if path.name != "__pycache__":
                                 directories.append(path)
                         else:
-                            z.write(path, path.relative_to(package))
+                            destination = path.relative_to(package)
+                            logging.debug(f"Archiving {path} to {destination}")
+                            z.write(path, destination)
     except BaseException:
         # If _anything_ goes wrong, we need to rebuild, so kill
         # build_info.

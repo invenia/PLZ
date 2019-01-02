@@ -1,6 +1,7 @@
 """
 Command-line interface for PLZ.
 """
+import logging
 import re
 from argparse import ArgumentParser
 from pathlib import Path
@@ -55,11 +56,15 @@ def main(input_args: Optional[Sequence[str]] = None):
         nargs="*",
         help="Any number of files or directories to include in the package.",
     )
+    parser.add_argument("--debug", action="store_true", help="Log at debug level")
     parser.add_argument(
         "--force", action="store_true", help="Build even if a matching package exists."
     )
 
     args = parser.parse_args(input_args)
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     package = build_package(
         args.build,
