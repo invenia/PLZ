@@ -64,4 +64,4 @@ pages:
       - public
     expire_in: 24 hours
   only:
-    - tags
+    - master
