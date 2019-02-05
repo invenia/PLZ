@@ -10,15 +10,7 @@ DOCS_DEPS = [
     "recommonmark",
     "sphinxcontrib-runcmd",
 ]
-CHECK_DEPS = [
-    "isort",
-    "flake8",
-    "flake8-quotes",
-    "pep8-naming",
-    "black",
-    "mypy",
-    "coverage",
-]
+CHECK_DEPS = ["flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
 REQUIREMENTS = ["virtualenv"]
 
 EXTRAS = {

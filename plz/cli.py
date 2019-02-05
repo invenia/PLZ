@@ -61,10 +61,7 @@ def main(input_args: Optional[Sequence[str]] = None):
         logging.getLogger().setLevel(logging.DEBUG)
 
     package = build_package(
-        args.build,
-        *args.files,
-        requirements=args.requirements,
-        force=args.force,
+        args.build, *args.files, requirements=args.requirements, force=args.force
     )
 
     print(package)
