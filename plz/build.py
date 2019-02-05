@@ -107,8 +107,16 @@ def build_package(
 
                 if requirements:
                     pip = env / "bin" / "pip"
+
+                    if not pip.exists():
+                        logging.error(
+                            "Pip does not exist in created virtual env bin directory. "
+                            "The following executables exist: %s",
+                            list((env / bin).iterdir())
+                        )
+
                     process = subprocess.run(
-                        (pip, "install", "-r", *map(str, requirements)),
+                        (str(pip), "install", "-r", *map(str, requirements)),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                     )
