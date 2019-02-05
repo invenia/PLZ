@@ -10,7 +10,15 @@ DOCS_DEPS = [
     "recommonmark",
     "sphinxcontrib-runcmd",
 ]
-CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
+CHECK_DEPS = [
+    "isort",
+    "flake8",
+    "flake8-quotes",
+    "pep8-naming",
+    "black",
+    "mypy",
+    "coverage",
+]
 REQUIREMENTS = ["virtualenv"]
 
 EXTRAS = {
@@ -28,7 +36,7 @@ setup(
     url="https://gitlab.invenia.ca/invenia/plz",
     packages=find_packages(exclude=["tests"]),
     install_requires=REQUIREMENTS,
-    test_require=TEST_DEPS,
+    tests_require=TEST_DEPS,
     extras_require=EXTRAS,
     entry_points={"console_scripts": ["plz = plz.cli:main"]},
 )
