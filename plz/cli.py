@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import Optional, Sequence
 
-from plz.build import PYTHON_VERSION, build_package
+from plz.build import build_package
 
 
 def python_version(version: str) -> str:
@@ -39,12 +39,6 @@ def main(input_args: Optional[Sequence[str]] = None):
         ),
     )
     parser.add_argument(
-        "--version",
-        type=python_version,
-        default=PYTHON_VERSION,
-        help="The version of python the lambda runs on (default 3.6).",
-    )
-    parser.add_argument(
         "--build",
         type=Path,
         default=Path("./build"),
@@ -70,7 +64,6 @@ def main(input_args: Optional[Sequence[str]] = None):
         args.build,
         *args.files,
         requirements=args.requirements,
-        version=args.version,
         force=args.force,
     )
 

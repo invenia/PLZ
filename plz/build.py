@@ -4,12 +4,12 @@ Build a package
 import json
 import logging
 import subprocess
+import venv
 from pathlib import Path
 from shutil import copy2, rmtree
+from sys import version_info
 from typing import Optional, Sequence, Set, Union
 from zipfile import ZipFile
-
-PYTHON_VERSION = "3.6"
 
 
 __all__ = ["build_package"]
@@ -19,7 +19,6 @@ def build_package(
     build: Path,
     *files: Path,
     requirements: Optional[Union[Path, Sequence[Path]]] = None,
-    version: str = PYTHON_VERSION,
     force: bool = False,
 ) -> Path:
     """
@@ -32,7 +31,6 @@ def build_package(
         requirements (Optional[Union[Path, Sequence[Path]]]): If given,
             a path to or a sequence of paths to requirements files to be
             installed.
-        version (str): The python version to use.
         force (bool): Build the package even if a pre-built version
             already exists.
     """
@@ -51,7 +49,6 @@ def build_package(
             "requirements": {
                 str(file): int(file.stat().st_mtime) for file in requirements
             },
-            "version": version,
         }
 
         if build_info.exists():
@@ -61,7 +58,6 @@ def build_package(
             old_info = {}
 
         if force or info != old_info:
-            python = f"python{version}"
             package = build / "package"
 
             build.mkdir(parents=True, exist_ok=True)
@@ -82,19 +78,10 @@ def build_package(
                     copy2(str(path), str(destination))
 
             if requirements:
+                python = f"python{version_info.major}.{version_info.minor}"
                 env = build / "package-env"
 
-                process = subprocess.run(
-                    ("virtualenv", "--clear", f"--python={python}", env),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-
-                if process.stdout:
-                    logging.debug(process.stdout)
-
-                if process.stderr:
-                    logging.error(process.stderr)
+                venv.create(env, clear=True, with_pip=True)
 
                 # Debian-based distros put packages in dist-packages,
                 # on linux there may be a separate lib64 directory.
