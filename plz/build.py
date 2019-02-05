@@ -106,17 +106,25 @@ def build_package(
                         existing = existing.union(directory.iterdir())
 
                 if requirements:
-                    pip = env / "bin" / "pip"
+                    python = env / "bin" / "python"
 
-                    if not pip.exists():
+                    if not python.exists():
                         logging.error(
-                            "Pip does not exist in created virtual env bin directory. "
-                            "The following executables exist: %s",
+                            "Python does not exist in created virtualenv?! "
+                            "The following executables exist in bin: %s",
                             list((env / "bin").iterdir())
                         )
 
                     process = subprocess.run(
-                        (str(pip), "install", "-r", *map(str, requirements)),
+                        (
+                            str(python),
+                            "-m",
+                            "pip",
+                            "install",
+                            "-r",
+                            *map(str, requirements
+                        )
+                    ),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                     )
