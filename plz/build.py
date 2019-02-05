@@ -112,7 +112,7 @@ def build_package(
                         logging.error(
                             "Pip does not exist in created virtual env bin directory. "
                             "The following executables exist: %s",
-                            list((env / bin).iterdir())
+                            list((env / "bin").iterdir())
                         )
 
                     process = subprocess.run(
