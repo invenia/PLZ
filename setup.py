@@ -1,7 +1,5 @@
 from setuptools import find_packages, setup
 
-from plz.version import __version__
-
 TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
 DOCS_DEPS = [
     "sphinx",
@@ -10,8 +8,8 @@ DOCS_DEPS = [
     "recommonmark",
     "sphinxcontrib-runcmd",
 ]
-CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-REQUIREMENTS = ["virtualenv"]
+CHECK_DEPS = ["flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
+REQUIREMENTS = []
 
 EXTRAS = {
     "test": TEST_DEPS,
@@ -22,13 +20,13 @@ EXTRAS = {
 
 setup(
     name="plz",
-    version=__version__,
+    version="0.3.0",
     description="Python Lambda Zipper",
     author="bcj",
     url="https://gitlab.invenia.ca/invenia/plz",
     packages=find_packages(exclude=["tests"]),
     install_requires=REQUIREMENTS,
-    test_require=TEST_DEPS,
+    tests_require=TEST_DEPS,
     extras_require=EXTRAS,
     entry_points={"console_scripts": ["plz = plz.cli:main"]},
 )

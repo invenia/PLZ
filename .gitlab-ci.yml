@@ -9,7 +9,7 @@ stages:
     - docker-ci
   image: python:3.6
   before_script:
-    - pip3 install tox
+    - pip3 install tox tox-venv
 
 "Test Python 3.6":
   <<: *config_3_6
