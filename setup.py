@@ -1,7 +1,5 @@
 from setuptools import find_packages, setup
 
-from plz.version import __version__
-
 TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
 DOCS_DEPS = [
     "sphinx",
@@ -11,7 +9,7 @@ DOCS_DEPS = [
     "sphinxcontrib-runcmd",
 ]
 CHECK_DEPS = ["flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-REQUIREMENTS = ["virtualenv"]
+REQUIREMENTS = []
 
 EXTRAS = {
     "test": TEST_DEPS,
@@ -22,7 +20,7 @@ EXTRAS = {
 
 setup(
     name="plz",
-    version=__version__,
+    version="0.3.0",
     description="Python Lambda Zipper",
     author="bcj",
     url="https://gitlab.invenia.ca/invenia/plz",
