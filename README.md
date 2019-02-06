@@ -32,3 +32,13 @@ Python Lambda Zipper also provides a command line interface:
 >plz --requirements requirements.txt file1 file2 folder
 <PATH TO ZIP FILE>
 ```
+
+## Testing
+
+In order to run tests, you will need to install both `tox`, and `tox-venv`:
+
+```sh
+pip install tox tox-venv
+```
+
+`tox-venv` is needed to get around an issue where virtual environments created using `venv.create` will install packages to the incorrect directory when run from within a virtual environment created by `virtualenv` ([issue](https://bugs.python.org/issue30811)).
