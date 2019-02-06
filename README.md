@@ -18,19 +18,73 @@ python setup.py install
 
 ## Basic Usage
 
-Python Lambda Zipper provides a single function, `build_package`:
+Python Lambda Zipper provides a single function, `build_package` which takes  a build directory to set up the package in and any number of files or folders as arguments and returns the path to the zipped package:
+
 
 ```python
+from pathlib import Path
+from zipfile import ZipFile
+
 from plz import build_package
 
-package = build_package(build_directory, any, files, folders, requirements=requirements_file)
+
+build_directory = Path("build")
+
+# the files to include:
+script = Path("lambda/index.py")
+utilities = Path("utilities/")
+
+print(list(utilities.iterdir()))
+# [Path("utilities/a.py"), Path("utilities/b.py"), ... Path("utilities/z.py")]
+
+package = build_package(build_directory, script, utilities)
+
+print(package)  # Path("build/package.zip")
+for file in ZipFile(package, "r").namelist():
+    print(file)
+# index.py
+# utilities/a.py
+# utilities/b.py
+# ...
+# utilities/z.py
+```
+
+You can also supply one or more requirements files for installing needed python packages:
+
+```python
+requirements = Path("requirements.txt")
+
+print(requirements.read_text())  # pg8000
+
+package = build_package(build_directory, script, utilities, requirements=requirements)
+
+print(package)  # Path("./build/package.zip")
+for file in ZipFile(package, "r").namelist():
+    print(file)
+# index.py
+# pg8000/__init__.py
+# pg8000/_version.py
+# pg8000/core.py
+# pg8000/pg_scram.py
+# utilities/lorem.py
+# ...
+# utilities/ipsum.py
 ```
 
 Python Lambda Zipper also provides a command line interface:
 
 ```sh
->plz --requirements requirements.txt file1 file2 folder
-<PATH TO ZIP FILE>
+>plz --requirements requirements.txt lambda/index.py utilities
+build/package.zip
+>ls build/package
+index.py
+pg8000/__init__.py
+pg8000/_version.py
+pg8000/core.py
+pg8000/pg_scram.py
+utilities/lorem.py
+...
+utilities/ipsum.py
 ```
 
 ## Testing
