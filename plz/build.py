@@ -78,7 +78,7 @@ def build_package(
                     copy2(str(path), str(destination))
 
             if requirements:
-                python = f"python{version_info.major}.{version_info.minor}"
+                python_version = f"python{version_info.major}.{version_info.minor}"
                 env = build / "package-env"
 
                 venv.create(env, clear=True, with_pip=True)
@@ -86,14 +86,14 @@ def build_package(
                 # Debian-based distros put packages in dist-packages,
                 # on linux there may be a separate lib64 directory.
                 package_directories = {
-                    env / lib / python / packages
+                    env / lib / python_version / packages
                     for lib in ("lib", "lib64")
                     for packages in ("site-packages", "dist-packages")
                 }
 
                 # Apparently packages can also go here on our CI system
                 package_directories = package_directories.union(
-                    {env / lib / python for lib in ("lib", "lib64")}
+                    {env / lib / python_version for lib in ("lib", "lib64")}
                 )
 
                 existing: Set[Path] = set()
@@ -112,7 +112,7 @@ def build_package(
                         logging.error(
                             "Python does not exist in created virtualenv?! "
                             "The following executables exist in bin: %s",
-                            list((env / "bin").iterdir())
+                            list((env / "bin").iterdir()),
                         )
 
                     process = subprocess.run(
@@ -122,9 +122,8 @@ def build_package(
                             "pip",
                             "install",
                             "-r",
-                            *map(str, requirements
-                        )
-                    ),
+                            *map(str, requirements),
+                        ),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                     )
