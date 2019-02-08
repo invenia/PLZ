@@ -19,6 +19,7 @@ def build_package(
     build: Path,
     *files: Path,
     requirements: Optional[Union[Path, Sequence[Path]]] = None,
+    zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
     """
@@ -31,6 +32,8 @@ def build_package(
         requirements (Optional[Union[Path, Sequence[Path]]]): If given,
             a path to or a sequence of paths to requirements files to be
             installed.
+        zipped_prefix (Optional[Path]): If given, a path to prepend to
+            all files in the package when zipping
         force (bool): Build the package even if a pre-built version
             already exists.
     """
@@ -49,6 +52,7 @@ def build_package(
             "requirements": {
                 str(file): int(file.stat().st_mtime) for file in requirements
             },
+            "zipped_prefix": str(zipped_prefix),
         }
 
         if build_info.exists():
@@ -172,6 +176,8 @@ def build_package(
                                 directories.append(path)
                         else:
                             destination = path.relative_to(package)
+                            if zipped_prefix:
+                                destination = zipped_prefix / destination
                             logging.debug(f"Archiving {path} to {destination}")
                             z.write(path, destination)
     except BaseException:

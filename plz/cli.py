@@ -52,6 +52,12 @@ def main(input_args: Optional[Sequence[str]] = None):
     )
     parser.add_argument("--debug", action="store_true", help="Log at debug level")
     parser.add_argument(
+        "--zipped-prefix",
+        default=None,
+        type=Path,
+        help="path to prepend to all files in the package when zipping",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="Build even if a matching package exists."
     )
 
