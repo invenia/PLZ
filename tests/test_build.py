@@ -81,21 +81,25 @@ def test_build():
             assert archive.read("file1.py") == file1.read_bytes()
             assert archive.read("lambda/file2.py") == file2.read_bytes()
 
-        # add requirements
+        # add requirements and directory prefix
         requirements = directory / "requirements.txt"
         requirements.write_text("pg8000==1.11\n")  # last version, should be stable
 
         package = build_package(
-            build, file1, lambda_directory, requirements=requirements
+            build,
+            file1,
+            lambda_directory,
+            requirements=requirements,
+            zipped_prefix=Path("python"),
         )
         assert package == build / "package.zip"
 
         with ZipFile(package, "r") as archive:
             assert set(archive.namelist()) == {
-                "file1.py",
-                "lambda/file2.py",
-                "pg8000/__init__.py",
-                "pg8000/_version.py",
-                "pg8000/core.py",
-                "six.py",
+                "python/file1.py",
+                "python/lambda/file2.py",
+                "python/pg8000/__init__.py",
+                "python/pg8000/_version.py",
+                "python/pg8000/core.py",
+                "python/six.py",
             }
