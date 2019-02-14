@@ -1,3 +1,5 @@
+from os.path import abspath, dirname, join
+
 from setuptools import find_packages, setup
 
 TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
@@ -8,7 +10,7 @@ DOCS_DEPS = [
     "recommonmark",
     "sphinxcontrib-runcmd",
 ]
-CHECK_DEPS = ["flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
+CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
 REQUIREMENTS = []
 
 EXTRAS = {
@@ -18,9 +20,13 @@ EXTRAS = {
     "dev": TEST_DEPS + CHECK_DEPS + DOCS_DEPS,
 }
 
+# Read in the version
+with open(join(dirname(abspath(__file__)), "VERSION")) as version_file:
+    version = version_file.read().strip()
+
 setup(
     name="plz",
-    version="0.3.0",
+    version=version,
     description="Python Lambda Zipper",
     author="bcj",
     url="https://gitlab.invenia.ca/invenia/plz",
@@ -31,4 +37,5 @@ setup(
     entry_points={"console_scripts": ["plz = plz.cli:main"]},
     package_data={"plz": ["py.typed"]},
     zip_safe=False,
+    include_package_data=True,
 )
