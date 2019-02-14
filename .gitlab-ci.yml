@@ -11,15 +11,32 @@ stages:
   before_script:
     - pip3 install tox tox-venv
 
+.config_3_7: &config_3_7
+  tags:
+    - docker-ci
+  image: python:3.7
+  before_script:
+    - pip3 install tox tox-venv
+
 "Test Python 3.6":
   <<: *config_3_6
   stage: test
-  script:
-    - tox -re py36
   artifacts:
     paths:
       - .coverage.*
     expire_in: 24 hours
+  script:
+    - tox -re py36
+
+"Test Python 3.7":
+  <<: *config_3_7
+  stage: test
+  artifacts:
+    paths:
+      - .coverage.*
+    expire_in: 24 hours
+  script:
+    - tox -re py37
 
 "Code Format Check":
   <<: *config_3_6
@@ -27,41 +44,59 @@ stages:
   script:
     - tox -re check
 
+"Check Version":
+  <<: *config_3_6
+  stage: test
+  only:
+    - tags
+  script:
+    - pip3 install virtualenv
+    - virtualenv venv
+    - source venv/bin/activate
+    - pip install -e .
+    - package_version=$(python -c "import plz; print(plz.__version__)")
+    - |
+      if [[ ${CI_COMMIT_TAG} != ${package_version} ]] ; then
+        echo "tag '$CI_COMMIT_TAG' does not match python version '$package_version'"
+        exit 1
+      fi
+
 "Coverage":
   <<: *config_3_6
   stage: coverage
   dependencies:
     - "Test Python 3.6"
-  script:
-    - tox -re coverage
+    - "Test Python 3.7"
   coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+\.\d+%)/'
   artifacts:
     paths:
       - dist/coverage
     expire_in: 24 hours
+  script:
+    - tox -re coverage
 
 "Build Documentation":
   <<: *config_3_6
   stage: docs
-  script:
-    - tox -re docs
   artifacts:
     paths:
       - dist/docs
     expire_in: 24 hours
+  script:
+    - tox -re docs
 
 pages:
   stage: deploy
   dependencies:
     - "Coverage"
     - "Build Documentation"
-  script:
-    - mkdir public
-    - mv dist/coverage public/coverage
-    - mv dist/docs public/docs
+  only:
+    - tags
   artifacts:
     paths:
       - public
     expire_in: 24 hours
-  only:
-    - master
+  script:
+    - mkdir public
+    - mv dist/docs public/docs
+    - mv dist/coverage public/coverage

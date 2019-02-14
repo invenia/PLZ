@@ -11,7 +11,6 @@ from sys import version_info
 from typing import Optional, Sequence, Set, Union
 from zipfile import ZipFile
 
-
 __all__ = ["build_package"]
 
 

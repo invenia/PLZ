@@ -1,8 +1,8 @@
 # Python Lambda Zipper
 
-[![Docs Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://invenia.pages.invenia.ca/plz/docs/)
-[![Build Status](https://gitlab.invenia.ca/invenia/plz/badges/master/build.svg)](https://gitlab.invenia.ca/invenia/plz/commits/master)
-[![Coverage Status](https://gitlab.invenia.ca/invenia/plz/badges/master/coverage.svg)](https://invenia.pages.invenia.ca/plz/coverage/)
+[![Docs Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://infrastructure.pages.invenia.ca/plz/docs/)
+[![Build Status](https://gitlab.invenia.ca/infrastructure/plz/badges/master/build.svg)](https://gitlab.invenia.ca/infrastructure/plz/commits/master)
+[![Coverage Status](https://gitlab.invenia.ca/infrastructure/plz/badges/master/coverage.svg)](https://infrastructure.pages.invenia.ca/plz/coverage/)
 [![Python Version](https://img.shields.io/badge/python-3.6-blue.svg)](https://www.python.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
