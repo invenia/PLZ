@@ -11,7 +11,7 @@ DOCS_DEPS = [
     "sphinxcontrib-runcmd",
 ]
 CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-REQUIREMENTS = []
+REQUIREMENTS = ["docker"]
 
 EXTRAS = {
     "test": TEST_DEPS,
