@@ -5,7 +5,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
+import pytest
 
+from plz.build import build_package
+
+'''
 def test_build():
     """
     Tests for plz.build.build_package
@@ -103,3 +107,4 @@ def test_build():
                 "python/pg8000/core.py",
                 "python/six.py",
             }
+'''

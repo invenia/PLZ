@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import Optional
 
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
@@ -26,7 +25,7 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
     logging.info(f"Building Docker Image: {DOCKER_IMAGE_NAME}")
     with (root_dir / "Dockerfile").open(mode="rb") as f:
         try:
-            image = client.build(
+            build_stream = client.build(
                 path=install_path,
                 fileobj=f,
                 tag=DOCKER_IMAGE_NAME,
@@ -43,7 +42,7 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
             raise
 
     # Print output stream
-    for line in image:
+    for line in build_stream:
         if "stream" not in line or line["stream"].strip() == "":
             continue
         logging.debug(line["stream"])
@@ -96,7 +95,7 @@ def start_docker_container(
 
     logging.info(f"Start Container: {container_name}")
     try:
-        client.start(container=container_id.get("Id"))
+        client.start(container=container_id["Id"])
     except APIError:
         logging.error("API Error")
         raise
@@ -132,11 +131,7 @@ def stop_docker_container(client: docker.APIClient, container_name: str):
     logging.info("Container Successfully Removed")
 
 
-def pip_install(
-    client: docker.APIClient,
-    container_name: str,
-    dependency: str,
-):
+def pip_install(client: docker.APIClient, container_name: str, dependency: str):
     """
     Pip install the python `dependency` in the docker container `container_name`.
 
