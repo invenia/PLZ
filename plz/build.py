@@ -4,12 +4,19 @@ Build a package
 import json
 import logging
 import subprocess
-import venv
 from pathlib import Path
 from shutil import copy2, rmtree
-from sys import version_info
-from typing import Optional, Sequence, Set, Union
+from typing import Optional, Sequence, Union
 from zipfile import ZipFile
+
+import docker
+
+from .docker import (
+    build_docker_image,
+    pip_install,
+    start_docker_container,
+    stop_docker_container,
+)
 
 __all__ = ["build_package"]
 
@@ -81,87 +88,38 @@ def build_package(
                     copy2(str(path), str(destination))
 
             if requirements:
-                python_version = f"python{version_info.major}.{version_info.minor}"
+                client = docker.APIClient()
                 env = build / "package-env"
+                container = "plz-container"
+                build_docker_image(client, env)
+                start_docker_container(client, container, env)
 
-                venv.create(env, clear=True, with_pip=True)
+                # pip install all requirements files
+                for r_file in requirements:
+                    with r_file.open() as f:
+                        for line in f.readlines():
+                            dep = line.strip()
+                            pip_install(client, container, dep)
 
-                # Debian-based distros put packages in dist-packages,
-                # on linux there may be a separate lib64 directory.
-                package_directories = {
-                    env / lib / python_version / packages
-                    for lib in ("lib", "lib64")
-                    for packages in ("site-packages", "dist-packages")
-                }
+                stop_docker_container(client, container)
 
-                # Apparently packages can also go here on our CI system
-                package_directories = package_directories.union(
-                    {env / lib / python_version for lib in ("lib", "lib64")}
-                )
+                # Remove all unnecessary __pycache__ dirs
+                for cache_dir in env.glob("**/__pycache__"):
+                    rmtree(cache_dir)
 
-                existing: Set[Path] = set()
+                # Remove all unnecessary *.dist-info dirs
+                for dist_dir in env.glob("**/*.dist-info"):
+                    rmtree(dist_dir)
 
-                # package directories will have some additional files in
-                # them (e.g, pip) that don't need to be copied into our
-                # package.
-                for directory in package_directories:
-                    if directory.exists():
-                        existing = existing.union(directory.iterdir())
-
-                if requirements:
-                    python = env / "bin" / "python"
-
-                    if not python.exists():
-                        logging.error(
-                            "Python does not exist in created virtualenv?! "
-                            "The following executables exist in bin: %s",
-                            list((env / "bin").iterdir()),
-                        )
-
-                    process = subprocess.run(
-                        (
-                            str(python),
-                            "-m",
-                            "pip",
-                            "install",
-                            "-r",
-                            *map(str, requirements),
-                        ),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-
-                    if process.stdout:
-                        logging.debug(process.stdout)
-
-                    if process.stderr:
-                        logging.error(process.stderr)
-
-                for directory in package_directories:
-
-                    if directory.exists():
-                        for path in directory.iterdir():
-                            # Skip things we know we don't need to add.
-                            # These are separate because black and
-                            # flake8 can't agree on where an or should
-                            # go.
-                            if path in package_directories or path in existing:
-                                continue
-                            if path.name == "__pycache__":
-                                continue
-                            if path.suffix == ".dist-info":
-                                continue
-
-                            destination = package / path.name
-
-                            if not destination.exists():
-                                logging.debug(f"Copying {destination}")
-                                if path.is_dir():
-                                    subprocess.run(
-                                        ("cp", "-Rn", f"{path}", str(destination))
-                                    )
-                                else:
-                                    copy2(str(path), str(destination))
+                # Copy the python libs to the package
+                for path in env.iterdir():
+                    destination = package / path.name
+                    if not destination.exists():
+                        logging.debug(f"Copying {destination}")
+                        if path.is_dir():
+                            subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
+                        else:
+                            copy2(str(path), str(destination))
 
             with ZipFile(zipfile, "w") as z:
                 directories = [package]

@@ -29,8 +29,8 @@ def main(input_args: Optional[Sequence[str]] = None):
     """
     parser = ArgumentParser(description="Package a python script for AWS Lambda.")
     parser.add_argument(
-        "--requirements",
         "-r",
+        "--requirements",
         type=Path,
         action="append",
         help=(
@@ -50,7 +50,6 @@ def main(input_args: Optional[Sequence[str]] = None):
         nargs="*",
         help="Any number of files or directories to include in the package.",
     )
-    parser.add_argument("--debug", action="store_true", help="Log at debug level")
     parser.add_argument(
         "--zipped-prefix",
         default=None,
@@ -61,10 +60,34 @@ def main(input_args: Optional[Sequence[str]] = None):
         "--force", action="store_true", help="Build even if a matching package exists."
     )
 
+    logger_group_parent = parser.add_argument_group(
+        title="logging arguments",
+        description="Control what log level the log outputs (default: logger.ERROR)",
+    )
+    logger_group = logger_group_parent.add_mutually_exclusive_group()
+
+    logger_group.add_argument(
+        "-d",
+        "--debug",
+        dest="log_level",
+        action="store_const",
+        const=logging.DEBUG,
+        default=logging.ERROR,
+        help="Set log level to DEBUG",
+    )
+    logger_group.add_argument(
+        "-v",
+        "--verbose",
+        dest="log_level",
+        action="store_const",
+        const=logging.INFO,
+        default=logging.ERROR,
+        help="Log at info level",
+    )
+
     args = parser.parse_args(input_args)
 
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(args.log_level)
 
     package = build_package(
         args.build, *args.files, requirements=args.requirements, force=args.force

@@ -5,8 +5,6 @@ from typing import Optional
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
 
-logger = logging.getLogger(__name__)
-
 DOCKER_IMAGE_NAME = "plz-builder"
 
 
@@ -25,7 +23,7 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
     """
     root_dir = Path(__file__).absolute().parent
 
-    logger.info(f"Building Docker Image: {DOCKER_IMAGE_NAME}")
+    logging.info(f"Building Docker Image: {DOCKER_IMAGE_NAME}")
     with (root_dir / "Dockerfile").open(mode="rb") as f:
         try:
             image = client.build(
@@ -37,7 +35,7 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
                 decode=True,
             )
         except APIError:
-            logger.error(
+            logging.error(
                 "Build Failed. Ensure Docker is installed and running, and that "
                 "internet access is available for the first run. Installation cannot "
                 "proceed."
@@ -48,8 +46,8 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
     for line in image:
         if "stream" not in line or line["stream"].strip() == "":
             continue
-        logger.debug(line["stream"])
-    logger.info("Build Completed Successfully")
+        logging.debug(line["stream"])
+    logging.info("Build Completed Successfully")
 
 
 def start_docker_container(
@@ -74,7 +72,7 @@ def start_docker_container(
         :obj:`docker.errors.APIError`: If any other docker error occurs
     """
 
-    logger.info(f"Creating Container: {container_name}")
+    logging.info(f"Creating Container: {container_name}")
     try:
         container_id = client.create_container(
             DOCKER_IMAGE_NAME,
@@ -83,26 +81,26 @@ def start_docker_container(
             name=container_name,
             host_config=client.create_host_config(
                 binds={
-                    f"{install_path}": {"bind": "/root/deps"},
+                    f"{install_path.resolve()}": {"bind": "/root/deps"},
                     f"{Path.home()}/.ssh": {"bind": "/root/.ssh"},
                 }
             ),
         )
     except ImageNotFound:
-        logger.error(f"{DOCKER_IMAGE_NAME} not found")
+        logging.error(f"{DOCKER_IMAGE_NAME} not found")
         raise
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
-    logger.info("Container Creation Successful")
+    logging.info("Container Creation Successful")
 
-    logger.info(f"Start Container: {container_name}")
+    logging.info(f"Start Container: {container_name}")
     try:
         client.start(container=container_id.get("Id"))
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
-    logger.info("Container Successfully Started")
+    logging.info("Container Successfully Started")
 
 
 def stop_docker_container(client: docker.APIClient, container_name: str):
@@ -117,28 +115,27 @@ def stop_docker_container(client: docker.APIClient, container_name: str):
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
 
-    logger.info(f"Stop Container: {container_name}")
+    logging.info(f"Stop Container: {container_name}")
     try:
         client.stop(container=container_name)
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
-    logger.info("Container Successfully Stopped")
+    logging.info("Container Successfully Stopped")
 
-    logger.info(f"Remove Container: {container_name}")
+    logging.info(f"Remove Container: {container_name}")
     try:
         client.remove_container(container=container_name)
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
-    logger.info("Container Successfully Removed")
+    logging.info("Container Successfully Removed")
 
 
 def pip_install(
     client: docker.APIClient,
     container_name: str,
     dependency: str,
-    python2: Optional[bool] = False,
 ):
     """
     Pip install the python `dependency` in the docker container `container_name`.
@@ -151,27 +148,26 @@ def pip_install(
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    python = "python3" if not python2 else "python2"
-    cmd = [python, "-m", "pip", "install", "-t", "/root/deps", dependency]
+    cmd = ["python3", "-m", "pip", "install", "-t", "/root/deps", dependency]
 
-    logger.info(f"Pip Install {dependency}: {cmd}")
+    logging.info(f"Pip Install {dependency}: {cmd}")
 
     try:
         ex = client.exec_create(
             container_name, cmd=cmd, environment=["PYTHONPATH=/root/deps"]
         )
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
 
     try:
         result = client.exec_start(ex["Id"], stream=True)
     except APIError:
-        logger.error("API Error")
+        logging.error("API Error")
         raise
 
     for line in result:
         decoded = line.decode("UTF-8").strip()
-        logger.info(decoded)
+        logging.info(decoded)
 
-    logger.info("Pip Install Complete")
+    logging.info("Pip Install Complete")
