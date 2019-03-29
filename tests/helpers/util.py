@@ -69,10 +69,7 @@ class MockAPIClient(object):
     def exec_start(self, *args, **kwargs):
         if self.es_api_error:
             raise APIError("test api error")
-        return [
-            b"test stream ",
-            b"test stream 2",
-        ]
+        return [b"test stream ", b"test stream 2"]
 
 
 class MockAPIClientError(MockAPIClient):

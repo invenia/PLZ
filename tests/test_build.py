@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 from zipfile import ZipFile
 
-import pytest
-
 import docker
+import pytest
 from docker.errors import APIError
+
 from helpers.util import MockAPIClient, MockAPIClientError
 from plz.build import (
     build_package,

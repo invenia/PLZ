@@ -6,10 +6,10 @@ import logging
 import subprocess
 from pathlib import Path
 from shutil import copy2, rmtree
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 from zipfile import ZipFile
 
-import docker
+import docker  # type: ignore
 
 from .docker import (
     build_docker_image,
@@ -24,7 +24,7 @@ __all__ = ["build_package"]
 def build_package(
     build: Path,
     *files: Path,
-    requirements: Optional[Union[Path, Sequence[Path]]] = (),
+    requirements: Sequence[Path] = [],
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -87,11 +87,7 @@ def build_package(
 
 
 def copy_included_files(
-    build_path: Path,
-    build_info: Path,
-    info: dict,
-    package_path: Path,
-    *files: Path,
+    build_path: Path, build_info: Path, info: dict, package_path: Path, *files: Path
 ):
     build_path.mkdir(parents=True, exist_ok=True)
     with build_info.open("w") as stream:
@@ -111,11 +107,7 @@ def copy_included_files(
             copy2(str(path), str(destination))
 
 
-def process_requirements(
-    requirements: Sequence[Path],
-    package_path: Path,
-    env: Path,
-):
+def process_requirements(requirements: Sequence[Path], package_path: Path, env: Path):
     client = docker.APIClient()
     container = "plz-container"
     build_docker_image(client, env)
@@ -150,9 +142,7 @@ def process_requirements(
 
 
 def zip_package(
-    zipfile_path: Path,
-    package_path: Path,
-    zipped_prefix: Optional[Path] = None
+    zipfile_path: Path, package_path: Path, zipped_prefix: Optional[Path] = None
 ):
     with ZipFile(zipfile_path, "w") as z:
         directories = [package_path]

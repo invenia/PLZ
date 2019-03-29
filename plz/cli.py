@@ -85,11 +85,14 @@ def main(args: Optional[Sequence[str]] = None):
     Args:
         args (Optional[Sequence[str]]): The command-line args.
     """
-    args = parse_args(args=args)
-    logging.getLogger().setLevel(args.log_level)
+    parsed_args = parse_args(args=args)
+    logging.getLogger().setLevel(parsed_args.log_level)
 
     package = build_package(
-        args.build, *args.files, requirements=args.requirements, force=args.force
+        parsed_args.build,
+        *parsed_args.files,
+        requirements=parsed_args.requirements,
+        force=parsed_args.force,
     )
 
     print(package)

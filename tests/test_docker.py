@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pytest
-
 from docker.errors import APIError, ImageNotFound
+
 from helpers.util import MockAPIClient
 from plz.docker import (
     build_docker_image,

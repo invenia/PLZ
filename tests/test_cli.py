@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
 
+import docker
 import pytest
 
-import docker
 from helpers.util import MockAPIClient
 from plz.cli import main as plz_main, parse_args
 
