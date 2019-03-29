@@ -2,7 +2,6 @@
 Command-line interface for PLZ.
 """
 import logging
-import re
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Optional, Sequence
@@ -10,29 +9,20 @@ from typing import Optional, Sequence
 from plz.build import build_package
 
 
-def python_version(version: str) -> str:
+def parse_args(args: Optional[Sequence[str]] = None):
     """
-    Check a python version
-    """
-    if not re.match(r"^[2,3,4]\.\d+$", version):
-        raise ValueError(version)
-
-    return version
-
-
-def main(input_args: Optional[Sequence[str]] = None):
-    """
-    Run PLZ from the command line.
+    Parse command line arguments for PLZ
 
     Args:
-        input_args (Optional[Sequence[str]]): The command-line args.
+        args (Optional[Sequence[str]]): The command-line args.
     """
-    parser = ArgumentParser(description="Package a python script for AWS Lambda.")
+    parser = ArgumentParser(description="plz - Package a python script for AWS Lambda.")
     parser.add_argument(
         "-r",
         "--requirements",
         type=Path,
         action="append",
+        default=[],
         help=(
             "Path to a requirements file for the package. "
             "Can be supplied multiple times."
@@ -85,8 +75,17 @@ def main(input_args: Optional[Sequence[str]] = None):
         help="Log at info level",
     )
 
-    args = parser.parse_args(input_args)
+    return parser.parse_args(args)
 
+
+def main(args: Optional[Sequence[str]] = None):
+    """
+    Run PLZ from the command line.
+
+    Args:
+        args (Optional[Sequence[str]]): The command-line args.
+    """
+    args = parse_args(args=args)
     logging.getLogger().setLevel(args.log_level)
 
     package = build_package(
