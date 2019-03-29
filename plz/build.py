@@ -24,7 +24,7 @@ __all__ = ["build_package"]
 def build_package(
     build: Path,
     *files: Path,
-    requirements: Optional[Union[Path, Sequence[Path]]] = None,
+    requirements: Optional[Union[Path, Sequence[Path]]] = (),
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -71,7 +71,8 @@ def build_package(
 
         # Process requirements files if they exist
         if requirements:
-            process_requirements(requirements, build, package)
+            env = build / "package-env"
+            process_requirements(requirements, package, env)
 
         # Zip it all up
         zip_package(zipfile, package, zipped_prefix=zipped_prefix)
@@ -80,7 +81,6 @@ def build_package(
         # build_info.
         if build_info.exists():
             build_info.unlink()
-
         raise
 
     return zipfile
@@ -112,12 +112,11 @@ def copy_included_files(
 
 
 def process_requirements(
-    requirements: Union[Path, Sequence[Path]],
-    build_path: Path,
+    requirements: Sequence[Path],
     package_path: Path,
+    env: Path,
 ):
     client = docker.APIClient()
-    env = build_path / "package-env"
     container = "plz-container"
     build_docker_image(client, env)
     start_docker_container(client, container, env)

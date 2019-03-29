@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from docker.errors import APIError, ImageNotFound
 
 
@@ -40,7 +42,12 @@ class MockAPIClient(object):
         return {"Id": "test id"}
 
     def create_host_config(self, *args, **kwargs):
-        pass
+        # Make sure the paths defined in binds exist
+        binds = kwargs["binds"]
+        for bind in binds:
+            path = Path(bind)
+            if not path.exists():
+                path.mkdir()
 
     def start(self, *args, **kwargs):
         if self.start_api_error:
@@ -66,3 +73,8 @@ class MockAPIClient(object):
             b"test stream ",
             b"test stream 2",
         ]
+
+
+class MockAPIClientError(MockAPIClient):
+    def build(self, *args, **kwargs):
+        raise APIError("test api error")
