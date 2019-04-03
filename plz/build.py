@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 from shutil import copy2, copytree, rmtree
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 from zipfile import ZipFile
 
 import docker  # type: ignore
@@ -23,7 +23,7 @@ __all__ = ["build_package"]
 def build_package(
     build: Path,
     *files: Path,
-    requirements: Sequence[Path] = [],
+    requirements: Union[Sequence[Path], Path] = [],
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -34,8 +34,8 @@ def build_package(
         build (:obj:`pathlib.Path`): The directory to build the package in.
         *files (:obj:`pathlib.Path`): Any number of files to include. Directories will
             be copied as subdirectories.
-        requirements (:obj:`Sequence[pathlib.Path]`): If given, a path to or a sequence
-            of paths to requirements files to be installed.
+        requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
+            path to or a sequence of paths to requirements files to be installed.
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
         force (:obj:`bool`): Build the package even if a pre-built version already
@@ -49,7 +49,7 @@ def build_package(
     package = build / "package"
 
     # Make sure requirements is a list
-    if not isinstance(requirements, list):
+    if isinstance(requirements, Path):
         requirements = [requirements]
 
     try:

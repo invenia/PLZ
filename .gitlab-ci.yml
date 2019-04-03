@@ -9,14 +9,16 @@ stages:
     - docker-ci
   image: python:3.6
   before_script:
-    - pip3 install tox tox-venv
+    - export NODOCKER=1
+    - pip3 install tox
 
 .config_3_7: &config_3_7
   tags:
     - docker-ci
   image: python:3.7
   before_script:
-    - pip3 install tox tox-venv
+    - export NODOCKER=1
+    - pip3 install tox
 
 "Test Python 3.6":
   <<: *config_3_6

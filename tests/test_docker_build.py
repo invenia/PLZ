@@ -1,9 +1,16 @@
+import os
 from pathlib import Path
 from zipfile import ZipFile
+
+import pytest
 
 from plz.build import build_package
 
 
+@pytest.mark.skipif(
+    os.environ.get("NODOCKER") == "1",
+    reason="This test needs docker to run"
+)
 def test_docker_build(tmpdir):
     build = Path(tmpdir) / "build"
     zip_path = build / "package.zip"
