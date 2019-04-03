@@ -10,7 +10,7 @@ from zipfile import ZipFile
 
 import docker  # type: ignore
 
-from .docker import (
+from .plzdocker import (
     build_docker_image,
     pip_install,
     start_docker_container,

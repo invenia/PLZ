@@ -9,7 +9,6 @@ stages:
     - docker-ci
   image: python:3.6
   before_script:
-    - export NODOCKER=1
     - pip3 install tox
 
 .config_3_7: &config_3_7
@@ -17,7 +16,6 @@ stages:
     - docker-ci
   image: python:3.7
   before_script:
-    - export NODOCKER=1
     - pip3 install tox
 
 "Test Python 3.6":
@@ -45,10 +43,6 @@ stages:
   tags:
     - amzn2
     - docker-build
-  artifacts:
-    paths:
-      - .coverage.*
-    expire_in: 24 hours
   before_script:
     - sudo yum -y update
     - sudo yum -y install python36 python36-devel python36-pip python-virtualenv gcc git
@@ -57,7 +51,7 @@ stages:
     - pip install tox
     - docker --version
   script:
-    - tox -e py36
+    - tox -e docker
 
 
 "Code Format Check":
@@ -89,7 +83,6 @@ stages:
   dependencies:
     - "Test Python 3.6"
     - "Test Python 3.7"
-    - "Test Docker Build (Linux 64-Bit)"
   coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+\.\d+%)/'
   artifacts:
     paths:
