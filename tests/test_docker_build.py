@@ -8,8 +8,7 @@ from plz.build import build_package
 
 
 @pytest.mark.skipif(
-    os.environ.get("NODOCKER") == "1",
-    reason="This test needs docker to run"
+    os.environ.get("NODOCKER") == "1", reason="This test needs docker to run"
 )
 def test_docker_build(tmpdir):
     build = Path(tmpdir) / "build"
