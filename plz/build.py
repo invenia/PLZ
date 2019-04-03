@@ -32,16 +32,18 @@ def build_package(
     Build a python package.
 
     Args:
-        build (Path): The directory to build the package in.
-        *files (Path): Any number of files to include. Directories will
+        build (:obj:`pathlib.Path`): The directory to build the package in.
+        *files (:obj:`pathlib.Path`): Any number of files to include. Directories will
             be copied as subdirectories.
-        requirements (Optional[Union[Path, Sequence[Path]]]): If given,
-            a path to or a sequence of paths to requirements files to be
-            installed.
-        zipped_prefix (Optional[Path]): If given, a path to prepend to
+        requirements (:obj:`Sequence[pathlib.Path]`): If given, a path to or a sequence
+            of paths to requirements files to be installed.
+        zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
-        force (bool): Build the package even if a pre-built version
-            already exists.
+        force (:obj:`bool`): Build the package even if a pre-built version already
+            exists.
+
+    Raises:
+        :obj:`BaseException`: If anything goes wrong
     """
     zipfile = build / "package.zip"
     build_info = build / "build-info.json"
@@ -89,13 +91,24 @@ def build_package(
 def copy_included_files(
     build_path: Path, build_info: Path, info: dict, package_path: Path, *files: Path
 ):
+    """
+    Copy the files and dirs pointed to by `*files` into the build_path
+
+    Args:
+        build_path (:obj:`pathlib.Path`): The main build directory
+        build_info (:obj:`pathlib.Path`): The path to the build-info.json file
+        info (:obj:`dict`): The build-info
+        package_path (:obj:`pathlib.Path`): The path to the resulting package directory
+        *files (:obj:`pathlib.Path`): The files/dirs to copy
+    """
+    # Make sure the main build directory is created
     build_path.mkdir(parents=True, exist_ok=True)
     with build_info.open("w") as stream:
         json.dump(info, stream)
 
+    # Delete the package path if it exists, and recreate it
     if package_path.exists():
         rmtree(package_path)
-
     package_path.mkdir()
 
     for path in files:
@@ -108,6 +121,15 @@ def copy_included_files(
 
 
 def process_requirements(requirements: Sequence[Path], package_path: Path, env: Path):
+    """
+    Using pip, install python requirements into a docker instance
+
+    Args:
+        requirements (:obj:`Sequence[pathlib.Path]`): Paths to requirements files to
+            install
+        package_path (:obj:`pathlib.Path`): Path to resulting package dir
+        env (:obj:`pathlib.Path`): Path to docker environment to install packages to
+    """
     client = docker.APIClient()
     container = "plz-container"
     build_docker_image(client, env)
@@ -136,14 +158,23 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
         if not destination.exists():
             logging.debug(f"Copying {destination}")
             if path.is_dir():
-                subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
+                copytree(path, destination / path.parts[-1], ignore=ignore)
             else:
-                copy2(str(path), str(destination))
+                copy2(path, destination)
 
 
 def zip_package(
     zipfile_path: Path, package_path: Path, zipped_prefix: Optional[Path] = None
 ):
+    """
+    Zip up files/dirs and python packages
+
+    Args:
+        zipfile_path (:obj:`pathlib.Path`): The path to the zipfile you want to make
+        package_path (:obj:`pathlib.Path`): The path to the package to be zipped
+        zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
+            resulting zip file
+    """
     with ZipFile(zipfile_path, "w") as z:
         directories = [package_path]
 
