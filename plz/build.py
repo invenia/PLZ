@@ -3,9 +3,8 @@ Build a package
 """
 import json
 import logging
-import subprocess
 from pathlib import Path
-from shutil import copy2, rmtree
+from shutil import copy2, copytree, ignore_patterns, rmtree
 from typing import Optional, Sequence
 from zipfile import ZipFile
 
@@ -111,13 +110,17 @@ def copy_included_files(
         rmtree(package_path)
     package_path.mkdir()
 
+    # Ignore unnecessary files/dirs
+    ignore = ignore_patterns("*.pyc", "__pycache__", "*.dist-info")
+
+    # For each file or dir, copy it into the package_path.
     for path in files:
         destination = package_path / path.name
 
         if path.is_dir():
-            subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
+            copytree(path, destination / path.parts[-1], ignore=ignore)
         else:
-            copy2(str(path), str(destination))
+            copy2(path, destination)
 
 
 def process_requirements(requirements: Sequence[Path], package_path: Path, env: Path):
@@ -144,13 +147,8 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
 
     stop_docker_container(client, container)
 
-    # Remove all unnecessary __pycache__ dirs
-    for cache_dir in env.glob("**/__pycache__"):
-        rmtree(cache_dir)
-
-    # Remove all unnecessary *.dist-info dirs
-    for dist_dir in env.glob("**/*.dist-info"):
-        rmtree(dist_dir)
+    # Ignore unnecessary files/dirs
+    ignore = ignore_patterns("*.pyc", "__pycache__", "*.dist-info")
 
     # Copy the python libs to the package
     for path in env.iterdir():
@@ -183,8 +181,7 @@ def zip_package(
 
             for path in directory.iterdir():
                 if path.is_dir():
-                    if path.name != "__pycache__":
-                        directories.append(path)
+                    directories.append(path)
                 else:
                     destination = path.relative_to(package_path)
                     if zipped_prefix:
