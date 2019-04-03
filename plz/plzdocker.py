@@ -88,8 +88,17 @@ def start_docker_container(
     except ImageNotFound:
         logging.error(f"{DOCKER_IMAGE_NAME} not found")
         raise
-    except APIError:
+    except APIError as e:
         logging.error("API Error")
+
+        # If we fail here because container_name already exists, let's just delete it
+        # and tell the user to try again
+        if e.status_code == 409 and "conflict" in e.explanation.lower():
+            logging.error(
+                f"{container_name} already exists. It will now be deleted "
+                "so that you can try running this again"
+            )
+            stop_docker_container(client, container_name)
         raise
     logging.info("Container Creation Successful")
 

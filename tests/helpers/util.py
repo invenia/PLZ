@@ -3,12 +3,18 @@ from pathlib import Path
 from docker.errors import APIError, ImageNotFound
 
 
+class MockResponse(object):
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+
 class MockAPIClient(object):
     def __init__(
         self,
         build_api_error=False,
         cc_image_error=False,
         cc_api_error=False,
+        cc_api_conflict_error=False,
         start_api_error=False,
         stop_api_error=False,
         rc_api_error=False,
@@ -18,6 +24,7 @@ class MockAPIClient(object):
         self.build_api_error = build_api_error
         self.cc_image_error = cc_image_error
         self.cc_api_error = cc_api_error
+        self.cc_api_conflict_error = cc_api_conflict_error
         self.start_api_error = start_api_error
         self.stop_api_error = stop_api_error
         self.rc_api_error = rc_api_error
@@ -39,6 +46,12 @@ class MockAPIClient(object):
             raise ImageNotFound("test image not found")
         if self.cc_api_error:
             raise APIError("test api error")
+        if self.cc_api_conflict_error:
+            raise APIError(
+                "test api error",
+                response=MockResponse(409),
+                explanation="Conflict the container already exists",
+            )
         return {"Id": "test id"}
 
     def create_host_config(self, *args, **kwargs):

@@ -26,12 +26,12 @@ def test_build_docker_image_failure(tmpdir):
 
 def test_start_docker_container_success(tmpdir):
     # tmpdir doesn't have the `resolve` command, so I need to wrap it in a Path
-    tmpdir_path = Path(str(tmpdir))
+    tmpdir_path = Path(tmpdir)
     start_docker_container(MockAPIClient(), TEST_CONTAINER, tmpdir_path)
 
 
 def test_start_docker_container_cc_image_failure(tmpdir):
-    tmpdir_path = Path(str(tmpdir))
+    tmpdir_path = Path(tmpdir)
     with pytest.raises(ImageNotFound):
         start_docker_container(
             MockAPIClient(cc_image_error=True), TEST_CONTAINER, tmpdir_path
@@ -39,15 +39,23 @@ def test_start_docker_container_cc_image_failure(tmpdir):
 
 
 def test_start_docker_container_cc_api_failure(tmpdir):
-    tmpdir_path = Path(str(tmpdir))
+    tmpdir_path = Path(tmpdir)
     with pytest.raises(APIError):
         start_docker_container(
             MockAPIClient(cc_api_error=True), TEST_CONTAINER, tmpdir_path
         )
 
 
+def test_start_docker_container_cc_api_conflict_failure(tmpdir):
+    tmpdir_path = Path(tmpdir)
+    with pytest.raises(APIError):
+        start_docker_container(
+            MockAPIClient(cc_api_conflict_error=True), TEST_CONTAINER, tmpdir_path
+        )
+
+
 def test_start_docker_container_start_api_failure(tmpdir):
-    tmpdir_path = Path(str(tmpdir))
+    tmpdir_path = Path(tmpdir)
     with pytest.raises(APIError):
         start_docker_container(
             MockAPIClient(start_api_error=True), TEST_CONTAINER, tmpdir_path
