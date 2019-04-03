@@ -4,7 +4,7 @@ Build a package
 import json
 import logging
 from pathlib import Path
-from shutil import copy2, copytree, ignore_patterns, rmtree
+from shutil import copy2, copytree, rmtree
 from typing import Optional, Sequence
 from zipfile import ZipFile
 
@@ -47,6 +47,10 @@ def build_package(
     zipfile = build / "package.zip"
     build_info = build / "build-info.json"
     package = build / "package"
+
+    # Make sure requirements is a list
+    if not isinstance(requirements, list):
+        requirements = [requirements]
 
     try:
         info = {
@@ -110,15 +114,11 @@ def copy_included_files(
         rmtree(package_path)
     package_path.mkdir()
 
-    # Ignore unnecessary files/dirs
-    ignore = ignore_patterns("*.pyc", "__pycache__", "*.dist-info")
-
     # For each file or dir, copy it into the package_path.
     for path in files:
         destination = package_path / path.name
-
         if path.is_dir():
-            copytree(path, destination / path.parts[-1], ignore=ignore)
+            copytree(path, destination)
         else:
             copy2(path, destination)
 
@@ -147,16 +147,14 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
 
     stop_docker_container(client, container)
 
-    # Ignore unnecessary files/dirs
-    ignore = ignore_patterns("*.pyc", "__pycache__", "*.dist-info")
-
     # Copy the python libs to the package
     for path in env.iterdir():
+        print(path)
         destination = package_path / path.name
         if not destination.exists():
             logging.debug(f"Copying {destination}")
             if path.is_dir():
-                copytree(path, destination / path.parts[-1], ignore=ignore)
+                copytree(path, destination)
             else:
                 copy2(path, destination)
 
@@ -173,6 +171,13 @@ def zip_package(
         zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
             resulting zip file
     """
+    # Delete unnecessary dirs
+    for cache_dir in package_path.glob("**/__pycache__"):
+        rmtree(cache_dir)
+
+    for dist_dir in package_path.glob("**/*.dist-info"):
+        rmtree(dist_dir)
+
     with ZipFile(zipfile_path, "w") as z:
         directories = [package_path]
 

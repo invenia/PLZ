@@ -242,7 +242,7 @@ def test_build_package_with_requirements_force_and_prefix(mock_api_client, tmpdi
     zipfile = build_package(
         build_path,
         *files,
-        requirements=(requirements,),
+        requirements=requirements,
         zipped_prefix=Path("prefix"),
         force=True,
     )
@@ -268,4 +268,4 @@ def test_build_package_failure(mock_api_client_error, tmpdir):
         f.write("pg8000")
 
     with pytest.raises(APIError):
-        build_package(build_path, *files, requirements=(requirements,))
+        build_package(build_path, *files, requirements=requirements)
