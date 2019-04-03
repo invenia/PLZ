@@ -38,6 +38,26 @@ stages:
   script:
     - tox -re py37
 
+"Test Docker Build (Linux 64-Bit)":
+  stage: test
+  tags:
+    - amzn2
+    - docker-build
+  artifacts:
+    paths:
+      - .coverage.*
+    expire_in: 24 hours
+  before_script:
+    - sudo yum -y update
+    - sudo yum -y install python36 python36-devel python36-pip python-virtualenv gcc git
+    - virtualenv --python=$(which python36) venv
+    - source venv/bin/activate
+    - pip install tox
+    - docker --version
+  script:
+    - tox -e py36
+
+
 "Code Format Check":
   <<: *config_3_6
   stage: test
@@ -67,6 +87,7 @@ stages:
   dependencies:
     - "Test Python 3.6"
     - "Test Python 3.7"
+    - "Test Docker Build (Linux 64-Bit)"
   coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+\.\d+%)/'
   artifacts:
     paths:
