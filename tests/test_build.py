@@ -119,6 +119,26 @@ def test_process_requirements(mock_api_client, tmpdir):
     assert (package_path / "pg8000").exists()
 
 
+def test_process_requirements_no_files_failure(mock_api_client, tmpdir):
+    build_path = Path(tmpdir / "build")
+    package_path = build_path / "package"
+    requirements = tmpdir / "requirements.txt"
+    env = build_path / "package-env"
+
+    build_path.mkdir()
+    package_path.mkdir()
+    with requirements.open("w") as f:
+        f.write("pg8000")
+
+    with pytest.raises(FileNotFoundError):
+        process_requirements((requirements,), package_path, env)
+
+    assert build_path.exists()
+    assert package_path.exists()
+    assert not (package_path / "file.py").exists()
+    assert not (package_path / "pg8000").exists()
+
+
 def test_zip_package_no_prefix(tmpdir):
     package_path = Path(tmpdir / "package")
     zip_path = tmpdir / "package.zip"
@@ -247,6 +267,11 @@ def test_build_package_with_requirements_force_and_prefix(mock_api_client, tmpdi
     requirements = Path(tmpdir / "requirements.txt")
     with requirements.open("w") as f:
         f.write("pg8000")
+
+    # Make sure something exists in the env
+    env = build_path / "package-env"
+    (env / "pg8000").mkdir(parents=True)
+    (env / "pg8000" / "test.py").write_text("# test")
 
     zipfile = build_package(
         build_path,

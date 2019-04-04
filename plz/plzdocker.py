@@ -107,6 +107,7 @@ def start_docker_container(
         client.start(container=container_id["Id"])
     except APIError:
         logging.error("API Error")
+        stop_docker_container(client, container_name)
         raise
     logging.info("Container Successfully Started")
 
@@ -162,12 +163,14 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
         )
     except APIError:
         logging.error("API Error")
+        stop_docker_container(client, container_name)
         raise
 
     try:
         result = client.exec_start(ex["Id"], stream=True)
     except APIError:
         logging.error("API Error")
+        stop_docker_container(client, container_name)
         raise
 
     for line in result:

@@ -132,6 +132,9 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
             install
         package_path (:obj:`pathlib.Path`): Path to resulting package dir
         env (:obj:`pathlib.Path`): Path to docker environment to install packages to
+
+    Raises:
+        FileNotFoundError: If no files are copied after pip installation
     """
     client = docker.APIClient()
     container = "plz-container"
@@ -148,15 +151,22 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
     stop_docker_container(client, container)
 
     # Copy the python libs to the package
+    has_copied = False
     for path in env.iterdir():
-        print(path)
         destination = package_path / path.name
         if not destination.exists():
             logging.debug(f"Copying {destination}")
+            has_copied = True
             if path.is_dir():
                 copytree(path, destination)
             else:
                 copy2(path, destination)
+
+    # If we haven't copied any files, raise an error because if we've installed
+    # something from a requirements.txt file, then we should have copied some files over
+    if not has_copied:
+        logging.error("Error: No files were copied after requirements processing.")
+        raise FileNotFoundError()
 
 
 def zip_package(
