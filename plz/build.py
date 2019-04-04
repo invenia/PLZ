@@ -84,6 +84,7 @@ def build_package(
     except BaseException:
         # If _anything_ goes wrong, we need to rebuild, so kill
         # build_info.
+        logging.error("Build Package Failed. See Traceback for Error")
         if build_info.exists():
             build_info.unlink()
         raise

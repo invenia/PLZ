@@ -86,10 +86,13 @@ def start_docker_container(
             ),
         )
     except ImageNotFound:
-        logging.error(f"{DOCKER_IMAGE_NAME} not found")
+        logging.error(
+            f"{DOCKER_IMAGE_NAME} not found. Could not start container: "
+            f"{container_name}"
+        )
         raise
     except APIError as e:
-        logging.error("API Error")
+        logging.error("Could not Create Docker Container")
 
         # If we fail here because container_name already exists, let's just delete it
         # and tell the user to try again
@@ -106,7 +109,7 @@ def start_docker_container(
     try:
         client.start(container=container_id["Id"])
     except APIError:
-        logging.error("API Error")
+        logging.error(f"Could not start docker container: {container_name}")
         stop_docker_container(client, container_name)
         raise
     logging.info("Container Successfully Started")
@@ -128,7 +131,7 @@ def stop_docker_container(client: docker.APIClient, container_name: str):
     try:
         client.stop(container=container_name)
     except APIError:
-        logging.error("API Error")
+        logging.error(f"Could not stop container: {container_name}")
         raise
     logging.info("Container Successfully Stopped")
 
@@ -136,7 +139,7 @@ def stop_docker_container(client: docker.APIClient, container_name: str):
     try:
         client.remove_container(container=container_name)
     except APIError:
-        logging.error("API Error")
+        logging.error(f"Could not remove container: {container_name}")
         raise
     logging.info("Container Successfully Removed")
 
@@ -162,14 +165,14 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
             container_name, cmd=cmd, environment=["PYTHONPATH=/root/deps"]
         )
     except APIError:
-        logging.error("API Error")
+        logging.error(f"Could not create docker exec command: {cmd}")
         stop_docker_container(client, container_name)
         raise
 
     try:
         result = client.exec_start(ex["Id"], stream=True)
     except APIError:
-        logging.error("API Error")
+        logging.error(f"Could not execute docker exec command: {cmd}")
         stop_docker_container(client, container_name)
         raise
 
