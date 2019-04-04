@@ -35,7 +35,7 @@ setup(
     tests_require=TEST_DEPS,
     extras_require=EXTRAS,
     entry_points={"console_scripts": ["plz = plz.cli:main"]},
-    package_data={"plz": ["py.typed", "Dockerfile"]},
+    package_data={"plz": ["Dockerfile"]},
     zip_safe=False,
     include_package_data=True,
 )

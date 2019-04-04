@@ -1,3 +1,2 @@
 include plz/VERSION
 include plz/Dockerfile
-include plz/py.typed
