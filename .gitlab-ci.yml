@@ -94,6 +94,8 @@ stages:
 "Build Documentation":
   <<: *config_3_6
   stage: docs
+  only:
+    - tags
   artifacts:
     paths:
       - dist/docs
