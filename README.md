@@ -3,17 +3,30 @@
 [![Docs Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://infrastructure.pages.invenia.ca/plz/docs/)
 [![Build Status](https://gitlab.invenia.ca/infrastructure/plz/badges/master/build.svg)](https://gitlab.invenia.ca/infrastructure/plz/commits/master)
 [![Coverage Status](https://gitlab.invenia.ca/infrastructure/plz/badges/master/coverage.svg)](https://infrastructure.pages.invenia.ca/plz/coverage/)
-[![Python Version](https://img.shields.io/badge/python-3.6-blue.svg)](https://www.python.org/)
+[![Python Version](https://img.shields.io/badge/python-3.6%20%7C%203.7-blue.svg)](https://www.python.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
 Zip up a python script (and its dependencies) so that it can be deployed to an AWS Lambda.
 
 ## Installation
 
-Python Lambda Zipper requires Python 3.6 or higher.
+Python Lambda Zipper requires Python 3.6 or higher, and docker.
 
-```python
-python setup.py install
+User `pip3` tp install cloudspy directly from gitlab:
+
+```sh
+# Make sure your installation of pip3 is up to date
+$ pip3 install --upgrade pip
+# Install plz
+$ pip3 install git+ssh://git@gitlab.invenia.ca/infrastructure/plz
+```
+
+## Upgrading
+
+Since we installed it through `pip3` with the gitlab url, we can just upgrade it with pip3:
+
+```sh
+pip3 install --upgrade plz
 ```
 
 ## Basic Usage
@@ -89,10 +102,8 @@ utilities/ipsum.py
 
 ## Testing
 
-In order to run tests, you will need to install both `tox`, and `tox-venv`:
+In order to run tests, you will need to install `tox`:
 
 ```sh
-pip install tox tox-venv
+pip install tox
 ```
-
-`tox-venv` is needed to get around an issue where virtual environments created using `venv.create` will install packages to the incorrect directory when run from within a virtual environment created by `virtualenv` ([issue](https://bugs.python.org/issue30811)).
