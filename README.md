@@ -12,7 +12,7 @@ Zip up a python script (and its dependencies) so that it can be deployed to an A
 
 Python Lambda Zipper requires Python 3.6 or higher, and [docker](https://gitlab.invenia.ca/invenia/wiki/blob/master/setup/docker.md).
 
-Use `pip3` tp install cloudspy directly from gitlab:
+Use `pip3` to install plz directly from gitlab:
 
 ```sh
 # Make sure your installation of pip3 is up to date
