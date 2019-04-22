@@ -6,7 +6,7 @@ exclude_lines =
     # Ignore unreachable code
     if __name__ == .__main__.:
     def __str__
-    sef __repr__
+    def __repr__
 
     # Specifically ignore a line with this text
     pragma: no cover
