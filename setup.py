@@ -11,7 +11,7 @@ DOCS_DEPS = [
     "sphinxcontrib-runcmd",
 ]
 CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-REQUIREMENTS = []
+REQUIREMENTS = ["docker"]
 
 EXTRAS = {
     "test": TEST_DEPS,
@@ -35,7 +35,7 @@ setup(
     tests_require=TEST_DEPS,
     extras_require=EXTRAS,
     entry_points={"console_scripts": ["plz = plz.cli:main"]},
-    package_data={"plz": ["py.typed"]},
+    package_data={"plz": ["Dockerfile"]},
     zip_safe=False,
     include_package_data=True,
 )

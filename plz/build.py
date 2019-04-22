@@ -3,13 +3,19 @@ Build a package
 """
 import json
 import logging
-import subprocess
-import venv
 from pathlib import Path
-from shutil import copy2, rmtree
-from sys import version_info
-from typing import Optional, Sequence, Set, Union
+from shutil import copy2, copytree, rmtree
+from typing import Optional, Sequence, Union
 from zipfile import ZipFile
+
+import docker  # type: ignore
+
+from .plzdocker import (
+    build_docker_image,
+    pip_install,
+    start_docker_container,
+    stop_docker_container,
+)
 
 __all__ = ["build_package"]
 
@@ -17,7 +23,7 @@ __all__ = ["build_package"]
 def build_package(
     build: Path,
     *files: Path,
-    requirements: Optional[Union[Path, Sequence[Path]]] = None,
+    requirements: Union[Sequence[Path], Path] = [],
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -25,25 +31,26 @@ def build_package(
     Build a python package.
 
     Args:
-        build (Path): The directory to build the package in.
-        *files (Path): Any number of files to include. Directories will
+        build (:obj:`pathlib.Path`): The directory to build the package in.
+        *files (:obj:`pathlib.Path`): Any number of files to include. Directories will
             be copied as subdirectories.
-        requirements (Optional[Union[Path, Sequence[Path]]]): If given,
-            a path to or a sequence of paths to requirements files to be
-            installed.
-        zipped_prefix (Optional[Path]): If given, a path to prepend to
+        requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
+            path to or a sequence of paths to requirements files to be installed.
+        zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
-        force (bool): Build the package even if a pre-built version
-            already exists.
+        force (:obj:`bool`): Build the package even if a pre-built version already
+            exists.
+
+    Raises:
+        :obj:`BaseException`: If anything goes wrong
     """
     zipfile = build / "package.zip"
-
-    if requirements is None:
-        requirements = ()
-    elif isinstance(requirements, Path):
-        requirements = (requirements,)
-
     build_info = build / "build-info.json"
+    package = build / "package"
+
+    # Make sure requirements is a list
+    if isinstance(requirements, Path):
+        requirements = [requirements]
 
     try:
         info = {
@@ -60,131 +67,140 @@ def build_package(
         else:
             old_info = {}
 
-        if force or info != old_info:
-            package = build / "package"
+        # Just return the zipfile path, if there is no new work to do on it
+        if not force and info == old_info:
+            return zipfile
 
-            build.mkdir(parents=True, exist_ok=True)
-            with build_info.open("w") as stream:
-                json.dump(info, stream)
+        # Copy the included files into the package dir
+        copy_included_files(build, build_info, info, package, *files)
 
-            if package.exists():
-                rmtree(package)
+        # Process requirements files if they exist
+        if requirements:
+            env = build / "package-env"
+            process_requirements(requirements, package, env)
 
-            package.mkdir()
-
-            for path in files:
-                destination = package / path.name
-
-                if path.is_dir():
-                    subprocess.run(("cp", "-Rn", f"{path}", str(destination)))
-                else:
-                    copy2(str(path), str(destination))
-
-            if requirements:
-                python_version = f"python{version_info.major}.{version_info.minor}"
-                env = build / "package-env"
-
-                venv.create(env, clear=True, with_pip=True)
-
-                # Debian-based distros put packages in dist-packages,
-                # on linux there may be a separate lib64 directory.
-                package_directories = {
-                    env / lib / python_version / packages
-                    for lib in ("lib", "lib64")
-                    for packages in ("site-packages", "dist-packages")
-                }
-
-                # Apparently packages can also go here on our CI system
-                package_directories = package_directories.union(
-                    {env / lib / python_version for lib in ("lib", "lib64")}
-                )
-
-                existing: Set[Path] = set()
-
-                # package directories will have some additional files in
-                # them (e.g, pip) that don't need to be copied into our
-                # package.
-                for directory in package_directories:
-                    if directory.exists():
-                        existing = existing.union(directory.iterdir())
-
-                if requirements:
-                    python = env / "bin" / "python"
-
-                    if not python.exists():
-                        logging.error(
-                            "Python does not exist in created virtualenv?! "
-                            "The following executables exist in bin: %s",
-                            list((env / "bin").iterdir()),
-                        )
-
-                    process = subprocess.run(
-                        (
-                            str(python),
-                            "-m",
-                            "pip",
-                            "install",
-                            "-r",
-                            *map(str, requirements),
-                        ),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-
-                    if process.stdout:
-                        logging.debug(process.stdout)
-
-                    if process.stderr:
-                        logging.error(process.stderr)
-
-                for directory in package_directories:
-
-                    if directory.exists():
-                        for path in directory.iterdir():
-                            # Skip things we know we don't need to add.
-                            # These are separate because black and
-                            # flake8 can't agree on where an or should
-                            # go.
-                            if path in package_directories or path in existing:
-                                continue
-                            if path.name == "__pycache__":
-                                continue
-                            if path.suffix == ".dist-info":
-                                continue
-
-                            destination = package / path.name
-
-                            if not destination.exists():
-                                logging.debug(f"Copying {destination}")
-                                if path.is_dir():
-                                    subprocess.run(
-                                        ("cp", "-Rn", f"{path}", str(destination))
-                                    )
-                                else:
-                                    copy2(str(path), str(destination))
-
-            with ZipFile(zipfile, "w") as z:
-                directories = [package]
-
-                while directories:
-                    directory = directories.pop()
-
-                    for path in directory.iterdir():
-                        if path.is_dir():
-                            if path.name != "__pycache__":
-                                directories.append(path)
-                        else:
-                            destination = path.relative_to(package)
-                            if zipped_prefix:
-                                destination = zipped_prefix / destination
-                            logging.debug(f"Archiving {path} to {destination}")
-                            z.write(path, destination)
+        # Zip it all up
+        zip_package(zipfile, package, zipped_prefix=zipped_prefix)
     except BaseException:
         # If _anything_ goes wrong, we need to rebuild, so kill
         # build_info.
+        logging.error("Build Package Failed. See Traceback for Error")
         if build_info.exists():
             build_info.unlink()
-
         raise
 
     return zipfile
+
+
+def copy_included_files(
+    build_path: Path, build_info: Path, info: dict, package_path: Path, *files: Path
+):
+    """
+    Copy the files and dirs pointed to by `*files` into the build_path
+
+    Args:
+        build_path (:obj:`pathlib.Path`): The main build directory
+        build_info (:obj:`pathlib.Path`): The path to the build-info.json file
+        info (:obj:`dict`): The build-info
+        package_path (:obj:`pathlib.Path`): The path to the resulting package directory
+        *files (:obj:`pathlib.Path`): The files/dirs to copy
+    """
+    # Make sure the main build directory is created
+    build_path.mkdir(parents=True, exist_ok=True)
+    with build_info.open("w") as stream:
+        json.dump(info, stream)
+
+    # Delete the package path if it exists, and recreate it
+    if package_path.exists():
+        rmtree(package_path)
+    package_path.mkdir()
+
+    # For each file or dir, copy it into the package_path.
+    for path in files:
+        destination = package_path / path.name
+        if path.is_dir():
+            copytree(path, destination)
+        else:
+            copy2(path, destination)
+
+
+def process_requirements(requirements: Sequence[Path], package_path: Path, env: Path):
+    """
+    Using pip, install python requirements into a docker instance
+
+    Args:
+        requirements (:obj:`Sequence[pathlib.Path]`): Paths to requirements files to
+            install
+        package_path (:obj:`pathlib.Path`): Path to resulting package dir
+        env (:obj:`pathlib.Path`): Path to docker environment to install packages to
+
+    Raises:
+        FileNotFoundError: If no files are copied after pip installation
+    """
+    client = docker.APIClient()
+    container = "plz-container"
+    build_docker_image(client, env)
+    start_docker_container(client, container, env)
+
+    # pip install all requirements files
+    for r_file in requirements:
+        with r_file.open() as f:
+            for line in f.readlines():
+                dep = line.strip()
+                pip_install(client, container, dep)
+
+    stop_docker_container(client, container)
+
+    # Copy the python libs to the package
+    has_copied = False
+    for path in env.iterdir():
+        destination = package_path / path.name
+        if not destination.exists():
+            logging.debug(f"Copying {destination}")
+            has_copied = True
+            if path.is_dir():
+                copytree(path, destination)
+            else:
+                copy2(path, destination)
+
+    # If we haven't copied any files, raise an error because if we've installed
+    # something from a requirements.txt file, then we should have copied some files over
+    if not has_copied:
+        logging.error("Error: No files were copied after requirements processing.")
+        raise FileNotFoundError()
+
+
+def zip_package(
+    zipfile_path: Path, package_path: Path, zipped_prefix: Optional[Path] = None
+):
+    """
+    Zip up files/dirs and python packages
+
+    Args:
+        zipfile_path (:obj:`pathlib.Path`): The path to the zipfile you want to make
+        package_path (:obj:`pathlib.Path`): The path to the package to be zipped
+        zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
+            resulting zip file
+    """
+    # Delete unnecessary dirs
+    for cache_dir in package_path.glob("**/__pycache__"):
+        rmtree(cache_dir)
+
+    for dist_dir in package_path.glob("**/*.dist-info"):
+        rmtree(dist_dir)
+
+    with ZipFile(zipfile_path, "w") as z:
+        directories = [package_path]
+
+        while directories:
+            directory = directories.pop()
+
+            for path in directory.iterdir():
+                if path.is_dir():
+                    directories.append(path)
+                else:
+                    destination = path.relative_to(package_path)
+                    if zipped_prefix:
+                        destination = zipped_prefix / destination
+                    logging.debug(f"Archiving {path} to {destination}")
+                    z.write(path, destination)

@@ -5,6 +5,8 @@ skip_covered = True
 exclude_lines =
     # Ignore unreachable code
     if __name__ == .__main__.:
+    def __str__
+    def __repr__
 
     # Specifically ignore a line with this text
     pragma: no cover

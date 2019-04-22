@@ -9,14 +9,14 @@ stages:
     - docker-ci
   image: python:3.6
   before_script:
-    - pip3 install tox tox-venv
+    - pip3 install tox
 
 .config_3_7: &config_3_7
   tags:
     - docker-ci
   image: python:3.7
   before_script:
-    - pip3 install tox tox-venv
+    - pip3 install tox
 
 "Test Python 3.6":
   <<: *config_3_6
@@ -37,6 +37,22 @@ stages:
     expire_in: 24 hours
   script:
     - tox -re py37
+
+"Test Docker Build (Linux 64-Bit)":
+  stage: test
+  tags:
+    - amzn2
+    - docker-build
+  before_script:
+    - sudo yum -y update
+    - sudo yum -y install python36 python36-devel python36-pip python-virtualenv gcc git
+    - virtualenv --python=$(which python36) venv
+    - source venv/bin/activate
+    - pip install tox
+    - docker --version
+  script:
+    - tox -e docker
+
 
 "Code Format Check":
   <<: *config_3_6
@@ -78,6 +94,8 @@ stages:
 "Build Documentation":
   <<: *config_3_6
   stage: docs
+  only:
+    - tags
   artifacts:
     paths:
       - dist/docs
