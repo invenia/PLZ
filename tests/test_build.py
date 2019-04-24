@@ -96,12 +96,16 @@ def test_process_requirements(mock_api_client, tmpdir):
     build_path = Path(tmpdir / "build")
     package_path = build_path / "package"
     requirements = tmpdir / "requirements.txt"
+    yum_requirements = tmpdir / "yum.yaml"
+
     env = build_path / "package-env"
 
     build_path.mkdir()
     package_path.mkdir()
     with requirements.open("w") as f:
         f.write("pg8000")
+    with yum_requirements.open("w") as f:
+        f.write("libpng:\n  - /usr/lib64/libpng15.so.15")
 
     # Create some env files
     env.mkdir()
@@ -111,7 +115,7 @@ def test_process_requirements(mock_api_client, tmpdir):
     with (env / "file.py").open("w") as f:
         f.write("# test")
 
-    process_requirements((requirements,), package_path, env)
+    process_requirements((requirements,), (yum_requirements,), package_path, env)
 
     assert build_path.exists()
     assert package_path.exists()
@@ -131,7 +135,7 @@ def test_process_requirements_no_files_failure(mock_api_client, tmpdir):
         f.write("pg8000")
 
     with pytest.raises(FileNotFoundError):
-        process_requirements((requirements,), package_path, env)
+        process_requirements((requirements,), [], package_path, env)
 
     assert build_path.exists()
     assert package_path.exists()
@@ -267,6 +271,9 @@ def test_build_package_with_requirements_force_and_prefix(mock_api_client, tmpdi
     requirements = Path(tmpdir / "requirements.txt")
     with requirements.open("w") as f:
         f.write("pg8000")
+    yum_requirements = Path(tmpdir / "yum.yaml")
+    with yum_requirements.open("w") as f:
+        f.write("libpng:\n  - /usr/lib64/libpng15.so.15")
 
     # Make sure something exists in the env
     env = build_path / "package-env"
@@ -277,6 +284,7 @@ def test_build_package_with_requirements_force_and_prefix(mock_api_client, tmpdi
         build_path,
         *files,
         requirements=requirements,
+        yum_requirements=yum_requirements,
         zipped_prefix=Path("prefix"),
         force=True,
     )

@@ -81,12 +81,15 @@ def test_docker_build(tmpdir):
     # Add requirements and directory prefix
     requirements = Path(tmpdir) / "requirements.txt"
     requirements.write_text("pg8000==1.11\n")  # Last version, should be stable
+    yum_requirements = Path(tmpdir) / "yum.yaml"
+    yum_requirements.write_text("libpng:\n  - /usr/lib64/libpng15.so.15\n")
 
     package = build_package(
         build,
         file1,
         lambda_dir,
         requirements=requirements,
+        yum_requirements=yum_requirements,
         zipped_prefix=Path("python"),
     )
     assert package == zip_path
@@ -95,6 +98,7 @@ def test_docker_build(tmpdir):
         assert set(archive.namelist()) == {
             "python/file1.py",
             "python/lambda/file2.py",
+            "python/libpng15.so.15",
             "python/pg8000/__init__.py",
             "python/pg8000/_version.py",
             "python/pg8000/core.py",
