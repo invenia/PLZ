@@ -178,11 +178,12 @@ def process_requirements(
         with y_file.open() as f:
             data = yaml.safe_load(f)
             for key in data:
-                yum_install(client, container, key, list(map(Path, data[key])))
+                paths = list(map(Path, data[key]))
+                yum_install(client, container, key, paths)
 
     stop_docker_container(client, container)
 
-    # Copy the python libs to the package
+    # Copy the libs to the package
     has_copied = False
     for path in env.iterdir():
         destination = package_path / path.name
