@@ -32,3 +32,4 @@ include:
     - docker --version
   script:
     - tox -e docker
+    - deactivate
