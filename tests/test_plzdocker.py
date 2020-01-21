@@ -15,13 +15,13 @@ TEST_CONTAINER = "test-container"
 TEST_PYTHON_DEP = "pg8000"
 
 
-def test_build_docker_image_success(tmpdir):
-    build_docker_image(MockAPIClient(), tmpdir)
+def test_build_docker_image_success():
+    build_docker_image(MockAPIClient())
 
 
-def test_build_docker_image_failure(tmpdir):
+def test_build_docker_image_failure():
     with pytest.raises(APIError):
-        build_docker_image(MockAPIClient(build_api_error=True), tmpdir)
+        build_docker_image(MockAPIClient(build_api_error=True))
 
 
 def test_start_docker_container_success(tmpdir):

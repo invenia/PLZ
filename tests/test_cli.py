@@ -9,11 +9,12 @@ from plz.cli import main as plz_main, parse_args
 
 
 def test_parse_args():
-    args = parse_args(["-r", "requirements.txt", "test1.py", "testpath"])
+    args = parse_args(["-r", "requirements.txt", "-p", "3.6", "test1.py", "testpath"])
     assert args.build == Path("./build")
     assert args.files == [Path("test1.py"), Path("testpath")]
     assert not args.force
     assert args.requirements == [Path("requirements.txt")]
+    assert args.python_version == "3.6"
     assert args.zipped_prefix is None
     assert args.log_level == logging.ERROR
 

@@ -41,6 +41,12 @@ def parse_args(args: Optional[Sequence[str]] = None):
         help="Any number of files or directories to include in the package.",
     )
     parser.add_argument(
+        "-p",
+        "--python-version",
+        default="3.7",
+        help="Version of Python to build with/for (<major>.<minor>)",
+    )
+    parser.add_argument(
         "--zipped-prefix",
         default=None,
         type=Path,
@@ -92,6 +98,7 @@ def main(args: Optional[Sequence[str]] = None):
         parsed_args.build,
         *parsed_args.files,
         requirements=parsed_args.requirements,
+        python_version=parsed_args.python_version,
         force=parsed_args.force,
     )
 
