@@ -1,13 +1,19 @@
 import logging
+from io import BytesIO
 from pathlib import Path
 
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
 
 DOCKER_IMAGE_NAME = "plz-builder"
+DOCKERFILE_TEMPLATE = """
+    FROM lambci/lambda:build-python{version}
+    RUN export PYTHONPATH=~/deps && pip install --upgrade pip
+    ENV HOME /root/
+    """
 
 
-def build_docker_image(client: docker.APIClient, install_path: Path):
+def build_docker_image(client: docker.APIClient, python_version: str = "3.7"):
     """
     Create a docker image named `plz-builder`.
     Builds image from `install_path`
@@ -16,30 +22,26 @@ def build_docker_image(client: docker.APIClient, install_path: Path):
         client (:obj:`docker.APIClient`): Docker APIClient object
         install_path (:obj:`pathlib.Path`): The directory to include in the docker
             image
+        python_version (:obj:`str`): The version of Python to build for
+            (<major>.<minor>), default: "3.7"
 
     Raises:
         :obj:`docker.errors.APIError`: If the build fails
     """
-    root_dir = Path(__file__).absolute().parent
-
     logging.info(f"Building Docker Image: {DOCKER_IMAGE_NAME}")
-    with (root_dir / "Dockerfile").open(mode="rb") as f:
-        try:
-            build_stream = client.build(
-                path=install_path,
-                fileobj=f,
-                tag=DOCKER_IMAGE_NAME,
-                rm=True,
-                encoding="UTF-8",
-                decode=True,
-            )
-        except APIError:
-            logging.error(
-                "Build Failed. Ensure Docker is installed and running, and that "
-                "internet access is available for the first run. Installation cannot "
-                "proceed."
-            )
-            raise
+    f = BytesIO(DOCKERFILE_TEMPLATE.format(version=python_version).encode("utf-8"))
+
+    try:
+        build_stream = client.build(
+            fileobj=f, tag=DOCKER_IMAGE_NAME, rm=True, encoding="UTF-8", decode=True
+        )
+    except APIError:
+        logging.error(
+            "Build Failed. Ensure Docker is installed and running, and that "
+            "internet access is available for the first run. Installation cannot "
+            "proceed."
+        )
+        raise
 
     # Print output stream
     for line in build_stream:
@@ -75,6 +77,7 @@ def start_docker_container(
     try:
         container_id = client.create_container(
             DOCKER_IMAGE_NAME,
+            "/bin/bash",
             detach=True,
             tty=True,
             name=container_name,
@@ -156,7 +159,7 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    cmd = ["python3", "-m", "pip", "install", "-t", "/root/deps", dependency]
+    cmd = ["pip", "install", "-t", "/root/deps", dependency]
 
     logging.info(f"Pip Install {dependency}: {cmd}")
 

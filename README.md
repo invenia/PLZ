@@ -87,7 +87,7 @@ for file in ZipFile(package, "r").namelist():
 Python Lambda Zipper also provides a command line interface:
 
 ```sh
->plz --requirements requirements.txt lambda/index.py utilities
+>plz --requirements requirements.txt --python-version 3.8 lambda/index.py utilities
 build/package.zip
 >ls build/package
 index.py

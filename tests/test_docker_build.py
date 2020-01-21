@@ -100,3 +100,17 @@ def test_docker_build(tmpdir):
             "python/pg8000/core.py",
             "python/six.py",
         }
+
+    # with a specific Python version
+    requirements.write_text("psycopg2-binary==2.8\n")  # Last version, should be stable
+
+    package = build_package(
+        build, file1, lambda_dir, requirements=requirements, python_version="3.6"
+    )
+    assert package == zip_path
+
+    with ZipFile(package, "r") as archive:
+        assert (
+            "psycopg2/_psycopg.cpython-36m-x86_64-linux-gnu.so" in archive.namelist()
+            or "psycopg2/_psycopg.cpython-36-x86_64-linux-gnu.so" in archive.namelist()
+        )

@@ -24,6 +24,7 @@ def build_package(
     build: Path,
     *files: Path,
     requirements: Union[Sequence[Path], Path] = [],
+    python_version: str = "3.7",
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -36,6 +37,8 @@ def build_package(
             be copied as subdirectories.
         requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
             path to or a sequence of paths to requirements files to be installed.
+        python_version (:obj:`str`): The version of Python to build for
+            (<major>.<minor>), default: "3.7"
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
         force (:obj:`bool`): Build the package even if a pre-built version already
@@ -77,7 +80,7 @@ def build_package(
         # Process requirements files if they exist
         if requirements:
             env = build / "package-env"
-            process_requirements(requirements, package, env)
+            process_requirements(requirements, package, env, python_version)
 
         # Zip it all up
         zip_package(zipfile, package, zipped_prefix=zipped_prefix)
@@ -124,7 +127,12 @@ def copy_included_files(
             copy2(path, destination)
 
 
-def process_requirements(requirements: Sequence[Path], package_path: Path, env: Path):
+def process_requirements(
+    requirements: Sequence[Path],
+    package_path: Path,
+    env: Path,
+    python_version: str = "3.7",
+):
     """
     Using pip, install python requirements into a docker instance
 
@@ -133,13 +141,15 @@ def process_requirements(requirements: Sequence[Path], package_path: Path, env: 
             install
         package_path (:obj:`pathlib.Path`): Path to resulting package dir
         env (:obj:`pathlib.Path`): Path to docker environment to install packages to
+        python_version (:obj:`str`): The version of Python to build for
+            (<major>.<minor>), default: "3.7"
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
     """
     client = docker.APIClient()
     container = "plz-container"
-    build_docker_image(client, env)
+    build_docker_image(client, python_version)
     start_docker_container(client, container, env)
 
     # pip install all requirements files
