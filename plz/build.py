@@ -26,8 +26,8 @@ def build_package(
     build: Path,
     *files: Path,
     requirements: Union[Sequence[Path], Path] = [],
-    python_version: str = "3.7",
     yum_requirements: Union[Sequence[Path], Path] = [],
+    python_version: str = "3.7",
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
 ) -> Path:
@@ -40,11 +40,11 @@ def build_package(
             be copied as subdirectories.
         requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
             path to or a sequence of paths to requirements files to be installed.
-        python_version (:obj:`str`): The version of Python to build for
-            (<major>.<minor>), default: "3.7"
         yum_requirements: (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If
             given, a path to or a sequence of paths to yum requirements yaml files to be
             installed
+        python_version (:obj:`str`): The version of Python to build for
+            (<major>.<minor>), default: "3.7"
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
         force (:obj:`bool`): Build the package even if a pre-built version already
