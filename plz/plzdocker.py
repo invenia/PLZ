@@ -186,7 +186,7 @@ def yum_install(
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    cmd = ["yum", "install", "-y", "--enablerepo=epel-testing", dependency]
+    cmd = ["yum", "install", "-y", dependency]
     cp_cmds = [["cp", "-RL", str(path), "/root/deps"] for path in paths]
 
     logging.info(f"Yum Install {dependency}: {cmd}")

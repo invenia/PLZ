@@ -14,6 +14,7 @@ import yaml
 from .plzdocker import (
     build_docker_image,
     pip_install,
+    run_docker_cmd,
     start_docker_container,
     stop_docker_container,
     yum_install,
@@ -172,6 +173,12 @@ def process_requirements(
             for line in f.readlines():
                 dep = line.strip()
                 pip_install(client, container, dep)
+
+    # If there are yum_requirements, install epel fomr amazon-linux-extras
+    if yum_requirements:
+        run_docker_cmd(
+            client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
+        )
 
     # yum install all yum_requirements
     for y_file in yum_requirements:
