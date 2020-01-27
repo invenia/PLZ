@@ -108,7 +108,7 @@ eccodes-data:
 ```
 
 ```python
-yum_requirements = Path("yum_requirements.txt")
+yum_requirements = Path("yum_requirements.yaml")
 
 print(yum_requirements.read_text())  # libpng\n  - /usr/lib64/libpng15.so.15
 
