@@ -1,6 +1,7 @@
 import logging
 from io import BytesIO
 from pathlib import Path
+from typing import Optional, Sequence
 
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
@@ -153,7 +154,7 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
 
     Args:
         client (:obj:`docker.APIClient`): Docker APIClient object
-        container_name (:obj:`str`): The name of the container to stop
+        container_name (:obj:`str`): The name of the container to use
         dependency (:obj:`str`): The python library to install
 
     Raises:
@@ -162,11 +163,61 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
     cmd = ["pip", "install", "-t", "/root/deps", dependency]
 
     logging.info(f"Pip Install {dependency}: {cmd}")
+    run_docker_cmd(client, container_name, cmd, environment=["PYTHONPATH=/root/deps"])
+    logging.info("Pip Install Complete")
 
+
+def yum_install(
+    client: docker.APIClient,
+    container_name: str,
+    dependency: str,
+    paths: Sequence[Path],
+):
+    """
+    Yum install the system `dependency` in the docker container `container_name`.
+
+    Args:
+        client (:obj:`docker.APIClient`): Docker APIClient object
+        container_name (:obj:`str`): The name of the container to use
+        dependency (:obj:`str`): The system dependency to install
+        paths: (:obj:`Sequence[pathlib.Path]`): A list of paths to copy back to
+            `/root/deps` after the dependency installation.
+
+    Raises:
+        :obj:`docker.errors.APIError`: If any docker error occurs
+    """
+    cmd = ["yum", "install", "-y", dependency]
+    cp_cmds = [["cp", "-RL", str(path), "/root/deps"] for path in paths]
+
+    logging.info(f"Yum Install {dependency}: {cmd}")
+    run_docker_cmd(client, container_name, cmd)
+    for cp_cmd in cp_cmds:
+        logging.info(f"Copy Dependency Files: {cp_cmd}")
+        run_docker_cmd(client, container_name, cp_cmd)
+    logging.info("Yum Install Complete")
+
+
+def run_docker_cmd(
+    client: docker.APIClient,
+    container_name: str,
+    cmd: Sequence[str],
+    environment: Optional[Sequence[str]] = None,
+):
+    """
+    Create and run a command on a docker container
+
+    Args:
+        client (:obj:`docker.APIClient`): Docker APIClient object
+        container_name (:obj:`str`): The name of the container to use
+        cmd (:obj:`Sequence[str]`): A list of strings that make up the command
+        environment: (:obj:`Optional[Sequence[str]]`): An optional list of environment
+            settings in the form of "FOO=bar"
+
+    Raises:
+        :obj:`docker.errors.APIError`: If any docker error occurs
+    """
     try:
-        ex = client.exec_create(
-            container_name, cmd=cmd, environment=["PYTHONPATH=/root/deps"]
-        )
+        ex = client.exec_create(container_name, cmd=cmd, environment=environment)
     except APIError:
         logging.error(f"Could not create docker exec command: {cmd}")
         stop_docker_container(client, container_name)
@@ -182,5 +233,3 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
     for line in result:
         decoded = line.decode("UTF-8").strip()
         logging.info(decoded)
-
-    logging.info("Pip Install Complete")

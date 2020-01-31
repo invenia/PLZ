@@ -9,12 +9,15 @@ from typing import Optional, Sequence, Union
 from zipfile import ZipFile
 
 import docker  # type: ignore
+import yaml
 
 from .plzdocker import (
     build_docker_image,
     pip_install,
+    run_docker_cmd,
     start_docker_container,
     stop_docker_container,
+    yum_install,
 )
 
 __all__ = ["build_package"]
@@ -24,6 +27,7 @@ def build_package(
     build: Path,
     *files: Path,
     requirements: Union[Sequence[Path], Path] = [],
+    yum_requirements: Union[Sequence[Path], Path] = [],
     python_version: str = "3.7",
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
@@ -37,6 +41,9 @@ def build_package(
             be copied as subdirectories.
         requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
             path to or a sequence of paths to requirements files to be installed.
+        yum_requirements: (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If
+            given, a path to or a sequence of paths to yum requirements yaml files to be
+            installed
         python_version (:obj:`str`): The version of Python to build for
             (<major>.<minor>), default: "3.7"
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
@@ -54,12 +61,15 @@ def build_package(
     # Make sure requirements is a list
     if isinstance(requirements, Path):
         requirements = [requirements]
+    if isinstance(yum_requirements, Path):
+        yum_requirements = [yum_requirements]
 
     try:
         info = {
-            "files": {str(file): int(file.stat().st_mtime) for file in files},
-            "requirements": {
-                str(file): int(file.stat().st_mtime) for file in requirements
+            "files": {str(f): int(f.stat().st_mtime) for f in files},
+            "requirements": {str(f): int(f.stat().st_mtime) for f in requirements},
+            "yum_requirements": {
+                str(f): int(f.stat().st_mtime) for f in yum_requirements
             },
             "zipped_prefix": str(zipped_prefix),
         }
@@ -78,9 +88,11 @@ def build_package(
         copy_included_files(build, build_info, info, package, *files)
 
         # Process requirements files if they exist
-        if requirements:
+        if requirements or yum_requirements:
             env = build / "package-env"
-            process_requirements(requirements, package, env, python_version)
+            process_requirements(
+                requirements, yum_requirements, package, env, python_version
+            )
 
         # Zip it all up
         zip_package(zipfile, package, zipped_prefix=zipped_prefix)
@@ -129,6 +141,7 @@ def copy_included_files(
 
 def process_requirements(
     requirements: Sequence[Path],
+    yum_requirements: Sequence[Path],
     package_path: Path,
     env: Path,
     python_version: str = "3.7",
@@ -139,6 +152,8 @@ def process_requirements(
     Args:
         requirements (:obj:`Sequence[pathlib.Path]`): Paths to requirements files to
             install
+        yum_requirements (:obj:`Sequence[pathlib.Path]`): Paths to yum requirements yaml
+            files to install
         package_path (:obj:`pathlib.Path`): Path to resulting package dir
         env (:obj:`pathlib.Path`): Path to docker environment to install packages to
         python_version (:obj:`str`): The version of Python to build for
@@ -159,9 +174,23 @@ def process_requirements(
                 dep = line.strip()
                 pip_install(client, container, dep)
 
+    # If there are yum_requirements, install epel fomr amazon-linux-extras
+    if yum_requirements:
+        run_docker_cmd(
+            client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
+        )
+
+    # yum install all yum_requirements
+    for y_file in yum_requirements:
+        with y_file.open() as f:
+            data = yaml.safe_load(f)
+            for key in data:
+                paths = list(map(Path, data[key]))
+                yum_install(client, container, key, paths)
+
     stop_docker_container(client, container)
 
-    # Copy the python libs to the package
+    # Copy the libs to the package
     has_copied = False
     for path in env.iterdir():
         destination = package_path / path.name

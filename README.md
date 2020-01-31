@@ -84,6 +84,46 @@ for file in ZipFile(package, "r").namelist():
 # utilities/ipsum.py
 ```
 
+You can also supply one or more yum requirements files for installing needed system packages:
+
+The yaml format for the yum requirements files is as follows:
+```yaml
+packagename:
+  - [location of files to copy]
+  - [location of more files to copy]
+  - etc
+packagename2:
+  - [location of files to copy]
+etc
+```
+
+For example:
+```yaml
+libpng:
+  - /usr/lib64/libpng15.so.15
+eccodes:
+  - /usr/lib64/libeccodes.so.0.1
+eccodes-data:
+  - /usr/share/eccodes/definitions
+```
+
+```python
+yum_requirements = Path("yum_requirements.yaml")
+
+print(yum_requirements.read_text())  # libpng\n  - /usr/lib64/libpng15.so.15
+
+package = build_package(build_directory, script, utilities, yum_requirements=yum_requirements)
+
+print(package)  # Path("./build/package.zip")
+for file in ZipFile(package, "r").namelist():
+  print(file)
+# index.py
+# libpng15.so.15
+# utilities/lorem.py
+...
+# utilities/ipsum.py
+```
+
 Python Lambda Zipper also provides a command line interface:
 
 ```sh

@@ -29,6 +29,17 @@ def parse_args(args: Optional[Sequence[str]] = None):
         ),
     )
     parser.add_argument(
+        "-y",
+        "--yum-requirements",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Path to a yum requirements yaml file for the package. "
+            "Can be supplied multiple times."
+        ),
+    )
+    parser.add_argument(
         "--build",
         type=Path,
         default=Path("./build"),
@@ -98,6 +109,7 @@ def main(args: Optional[Sequence[str]] = None):
         parsed_args.build,
         *parsed_args.files,
         requirements=parsed_args.requirements,
+        yum_requirements=parsed_args.yum_requirements,
         python_version=parsed_args.python_version,
         force=parsed_args.force,
     )
