@@ -26,8 +26,8 @@ __all__ = ["build_package"]
 def build_package(
     build: Path,
     *files: Path,
-    requirements: Union[Sequence[Path], Path] = [],
-    yum_requirements: Union[Sequence[Path], Path] = [],
+    requirements: Optional[Union[Sequence[Path], Path]] = None,
+    yum_requirements: Optional[Union[Sequence[Path], Path]] = None,
     python_version: str = "3.7",
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
@@ -39,11 +39,12 @@ def build_package(
         build (:obj:`pathlib.Path`): The directory to build the package in.
         *files (:obj:`pathlib.Path`): Any number of files to include. Directories will
             be copied as subdirectories.
-        requirements (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If given, a
-            path to or a sequence of paths to requirements files to be installed.
-        yum_requirements: (:obj:`Union[Sequence[pathlib.Path], pathlib.Path]`): If
-            given, a path to or a sequence of paths to yum requirements yaml files to be
-            installed
+        requirements (:obj:`Optional[Union[Sequence[pathlib.Path], pathlib.Path]]`):
+            If given, a path to or a sequence of paths to requirements files to be
+            installed.
+        yum_requirements (:obj:`Optional[Union[Sequence[pathlib.Path], pathlib.Path]]`):
+            If given, a path to or a sequence of paths to yum requirements yaml files to
+            be installed
         python_version (:obj:`str`): The version of Python to build for
             (<major>.<minor>), default: "3.7"
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
@@ -58,18 +59,25 @@ def build_package(
     build_info = build / "build-info.json"
     package = build / "package"
 
-    # Make sure requirements is a list
-    if isinstance(requirements, Path):
+    # Make sure requirements and yum_requirements are lists
+    if requirements is None:
+        requirements = []
+    elif isinstance(requirements, Path):
         requirements = [requirements]
-    if isinstance(yum_requirements, Path):
+
+    if yum_requirements is None:
+        yum_requirements = []
+    elif isinstance(yum_requirements, Path):
         yum_requirements = [yum_requirements]
 
     try:
         info = {
-            "files": {str(f): int(f.stat().st_mtime) for f in files},
-            "requirements": {str(f): int(f.stat().st_mtime) for f in requirements},
+            "files": {str(f): _get_last_modified_timestamp(f) for f in files},
+            "requirements": {
+                str(f): _get_last_modified_timestamp(f) for f in requirements
+            },
             "yum_requirements": {
-                str(f): int(f.stat().st_mtime) for f in yum_requirements
+                str(f): _get_last_modified_timestamp(f) for f in yum_requirements
             },
             "zipped_prefix": str(zipped_prefix),
         }
@@ -105,6 +113,27 @@ def build_package(
         raise
 
     return zipfile
+
+
+def _get_last_modified_timestamp(path: Path):
+    """
+    Return the last modified time of the file or directory pointed to by path
+
+    Args:
+        path (:obj:`pathlib.Path`): The file/directory to get the last modified time
+            from.
+    """
+    last_modified = int(path.stat().st_mtime)
+
+    if path.is_dir():
+        directory_last_modified = max(
+            (_get_last_modified_timestamp(p) for p in path.iterdir()), default=None
+        )
+
+        if directory_last_modified is not None:
+            last_modified = max(last_modified, directory_last_modified)
+
+    return last_modified
 
 
 def copy_included_files(

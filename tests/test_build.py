@@ -2,6 +2,7 @@
 Tests for plz.build
 """
 import json
+import os
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -311,3 +312,28 @@ def test_build_package_failure(mock_api_client_error, tmpdir):
 
     with pytest.raises(APIError):
         build_package(build_path, *files, requirements=requirements)
+
+
+def test_build_package_update_nested_file(mock_api_client, tmpdir):
+    build_path = Path(tmpdir / "build")
+    files_path = Path(tmpdir / "files")
+    build_info_path = build_path / "build-info.json"
+
+    root_directory = files_path / "root_directory"
+    root_directory.mkdir(parents=True)
+    nested_directory = root_directory / "nested_directory"
+    nested_directory.mkdir()
+    nested_file = nested_directory / "nested_file.txt"
+    nested_file.write_text("test")
+
+    build_package(build_path, root_directory)
+    original_build_info = json.loads(build_info_path.read_text())
+
+    # Update the last modified time of the nested file
+    new_modified_time = original_build_info["files"][str(root_directory)] + 10
+    os.utime(nested_file, (new_modified_time, new_modified_time))
+
+    # Make sure that rebuilding the package detects that the directory was updated
+    build_package(build_path, root_directory)
+    new_build_info = json.loads(build_info_path.read_text())
+    assert new_build_info["files"][str(root_directory)] == new_modified_time
