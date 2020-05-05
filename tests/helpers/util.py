@@ -20,6 +20,8 @@ class MockAPIClient(object):
         rc_api_error=False,
         ec_api_error=False,
         es_api_error=False,
+        ei_api_error=False,
+        ei_exit_code=0,
     ):
         self.build_api_error = build_api_error
         self.cc_image_error = cc_image_error
@@ -30,6 +32,8 @@ class MockAPIClient(object):
         self.rc_api_error = rc_api_error
         self.ec_api_error = ec_api_error
         self.es_api_error = es_api_error
+        self.ei_api_error = ei_api_error
+        self.ei_exit_code = ei_exit_code
 
     def build(self, *args, **kwargs):
         if self.build_api_error:
@@ -83,6 +87,11 @@ class MockAPIClient(object):
         if self.es_api_error:
             raise APIError("test api error")
         return [b"test stream ", b"test stream 2"]
+
+    def exec_inspect(self, *args, **kwargs):
+        if self.ei_api_error:
+            raise APIError("test api error")
+        return {"ExitCode": self.ei_exit_code}
 
 
 class MockAPIClientError(MockAPIClient):
