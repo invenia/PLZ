@@ -196,28 +196,30 @@ def process_requirements(
     build_docker_image(client, python_version)
     start_docker_container(client, container, env)
 
-    # pip install all requirements files
-    for r_file in requirements:
-        with r_file.open() as f:
-            for line in f.readlines():
-                dep = line.strip()
-                pip_install(client, container, dep)
+    try:
+        # pip install all requirements files
+        for r_file in requirements:
+            with r_file.open() as f:
+                for line in f.readlines():
+                    dep = line.strip()
+                    pip_install(client, container, dep)
 
-    # If there are yum_requirements, install epel fomr amazon-linux-extras
-    if yum_requirements:
-        run_docker_cmd(
-            client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
-        )
+        # If there are yum_requirements, install epel fomr amazon-linux-extras
+        if yum_requirements:
+            run_docker_cmd(
+                client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
+            )
 
-    # yum install all yum_requirements
-    for y_file in yum_requirements:
-        with y_file.open() as f:
-            data = yaml.safe_load(f)
-            for key in data:
-                paths = list(map(Path, data[key]))
-                yum_install(client, container, key, paths)
+        # yum install all yum_requirements
+        for y_file in yum_requirements:
+            with y_file.open() as f:
+                data = yaml.safe_load(f)
+                for key in data:
+                    paths = list(map(Path, data[key]))
+                    yum_install(client, container, key, paths)
 
-    stop_docker_container(client, container)
+    finally:
+        stop_docker_container(client, container)
 
     # Copy the libs to the package
     has_copied = False

@@ -215,21 +215,38 @@ def run_docker_cmd(
 
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
+        :obj:`RuntimeError`: If the cmd returns a non-zero exit code
     """
     try:
         ex = client.exec_create(container_name, cmd=cmd, environment=environment)
     except APIError:
-        logging.error(f"Could not create docker exec command: {cmd}")
+        logging.error("Could not create docker exec command: %s", cmd)
         stop_docker_container(client, container_name)
         raise
 
     try:
         result = client.exec_start(ex["Id"], stream=True)
     except APIError:
-        logging.error(f"Could not execute docker exec command: {cmd}")
+        logging.error("Could not execute docker exec command: %s", cmd)
         stop_docker_container(client, container_name)
         raise
 
+    cmd_output = []
     for line in result:
         decoded = line.decode("UTF-8").strip()
         logging.info(decoded)
+        cmd_output.append(decoded)
+
+    try:
+        exec_info = client.exec_inspect(ex["Id"])
+    except APIError:
+        logging.error("Could not inspect docker exec command: %s", cmd)
+        stop_docker_container(client, container_name)
+        raise
+
+    if exec_info["ExitCode"]:
+        cmd_output_string = "\n".join(cmd_output)
+        exception_string = (
+            f"The following error occurred while executing {cmd}:\n{cmd_output_string}"
+        )
+        raise RuntimeError(exception_string)
