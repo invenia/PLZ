@@ -212,7 +212,8 @@ def process_requirements(
         # see https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html
         # Note: The "amazonlinux" runtime used for older python versions does not
         # contain amazon-linux-extras
-        if yum_requirements and python_version >= "3.8":
+        version_tuple = tuple(map(int, python_version.split(".", 1)))
+        if yum_requirements and version_tuple >= (3, 8):
             run_docker_cmd(
                 client,
                 container,
