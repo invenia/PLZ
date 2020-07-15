@@ -2,6 +2,7 @@ from os.path import abspath, dirname, join
 
 from setuptools import find_packages, setup
 
+
 TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
 DOCS_DEPS = [
     "sphinx",

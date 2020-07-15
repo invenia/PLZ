@@ -3,13 +3,14 @@ from pathlib import Path
 import pytest
 from docker.errors import APIError, ImageNotFound
 
-from helpers.util import MockAPIClient
 from plz.plzdocker import (
     build_docker_image,
     pip_install,
     start_docker_container,
     stop_docker_container,
 )
+from tests.helpers.util import MockAPIClient
+
 
 TEST_CONTAINER = "test-container"
 TEST_PYTHON_DEP = "pg8000"

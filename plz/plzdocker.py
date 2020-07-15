@@ -6,6 +6,7 @@ from typing import Optional, Sequence
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
 
+
 DOCKER_IMAGE_NAME = "plz-builder"
 DOCKERFILE_TEMPLATE = """
     FROM lambci/lambda:build-python{version}

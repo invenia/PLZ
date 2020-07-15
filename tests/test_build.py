@@ -10,13 +10,14 @@ import docker
 import pytest
 from docker.errors import APIError
 
-from helpers.util import MockAPIClient, MockAPIClientError
 from plz.build import (
     build_package,
     copy_included_files,
     process_requirements,
     zip_package,
 )
+from tests.helpers.util import MockAPIClient, MockAPIClientError
+
 
 TEST_INFO = {
     "files": {"file1.py": 1},
