@@ -2,6 +2,7 @@ from recommonmark.transform import AutoStructify
 
 from plz.version import __version__
 
+
 # Sphinx Base --------------------------------------------------------------------------
 # Extensions
 extensions = [

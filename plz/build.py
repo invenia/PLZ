@@ -20,6 +20,7 @@ from .plzdocker import (
     yum_install,
 )
 
+
 __all__ = ["build_package"]
 
 
@@ -196,28 +197,41 @@ def process_requirements(
     build_docker_image(client, python_version)
     start_docker_container(client, container, env)
 
-    # pip install all requirements files
-    for r_file in requirements:
-        with r_file.open() as f:
-            for line in f.readlines():
-                dep = line.strip()
-                pip_install(client, container, dep)
+    try:
+        # pip install all requirements files
+        for r_file in requirements:
+            with r_file.open() as f:
+                for line in f.readlines():
+                    dep = line.strip()
+                    pip_install(client, container, dep)
 
-    # If there are yum_requirements, install epel fomr amazon-linux-extras
-    if yum_requirements:
-        run_docker_cmd(
-            client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
-        )
+        # Install epel from amazon-linux-extras if there are yum_requirements and the
+        # Lambda runtime for the specified python version is "amazonlinux:2".
+        #
+        # As of python 3.8, the AWS Lambda runtime has switched to "amazonlinux:2"
+        # see https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html
+        # Note: The "amazonlinux" runtime used for older python versions does not
+        # contain amazon-linux-extras
+        version_tuple = tuple(map(int, python_version.split(".", 1)))
+        if yum_requirements and version_tuple >= (3, 8):
+            run_docker_cmd(
+                client,
+                container,
+                # Note: If we don't set the python version to python2 then the epel
+                # install will fail
+                ["env", "PYTHON=python2", "amazon-linux-extras", "install", "epel"],
+            )
 
-    # yum install all yum_requirements
-    for y_file in yum_requirements:
-        with y_file.open() as f:
-            data = yaml.safe_load(f)
-            for key in data:
-                paths = list(map(Path, data[key]))
-                yum_install(client, container, key, paths)
+        # yum install all yum_requirements
+        for y_file in yum_requirements:
+            with y_file.open() as f:
+                data = yaml.safe_load(f)
+                for key in data:
+                    paths = list(map(Path, data[key]))
+                    yum_install(client, container, key, paths)
 
-    stop_docker_container(client, container)
+    finally:
+        stop_docker_container(client, container)
 
     # Copy the libs to the package
     has_copied = False

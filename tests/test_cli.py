@@ -4,8 +4,8 @@ from pathlib import Path
 import docker
 import pytest
 
-from helpers.util import MockAPIClient
 from plz.cli import main as plz_main, parse_args
+from tests.helpers.util import MockAPIClient
 
 
 def test_parse_args():
