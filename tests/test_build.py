@@ -116,7 +116,9 @@ def test_process_requirements(mock_api_client, tmpdir):
     with (env / "file.py").open("w") as f:
         f.write("# test")
 
-    process_requirements((requirements,), (yum_requirements,), package_path, env)
+    process_requirements(
+        (requirements,), (yum_requirements,), package_path, env, python_version="3.8"
+    )
 
     assert build_path.exists()
     assert package_path.exists()

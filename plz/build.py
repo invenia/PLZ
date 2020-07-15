@@ -204,10 +204,20 @@ def process_requirements(
                     dep = line.strip()
                     pip_install(client, container, dep)
 
-        # If there are yum_requirements, install epel fomr amazon-linux-extras
-        if yum_requirements:
+        # Install epel from amazon-linux-extras if there are yum_requirements and the
+        # Lambda runtime for the specified python version is "amazonlinux:2".
+        #
+        # As of python 3.8, the AWS Lambda runtime has switched to "amazonlinux:2"
+        # see https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html
+        # Note: The "amazonlinux" runtime used for older python versions does not
+        # contain amazon-linux-extras
+        if yum_requirements and python_version >= "3.8":
             run_docker_cmd(
-                client, container, ["sudo", "amazon-linux-extras", "install", "epel"]
+                client,
+                container,
+                # Note: If we don't set the python version to python2 then the epel
+                # install will fail
+                ["env", "PYTHON=python2", "amazon-linux-extras", "install", "epel"],
             )
 
         # yum install all yum_requirements
