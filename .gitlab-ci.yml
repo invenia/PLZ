@@ -1,10 +1,10 @@
 ---
 include:
-  - project: infrastructure/gitlab-ci-helper
+  - project: invenia/gitlab-ci-helper
     file: /templates/python.yml
-  - project: infrastructure/gitlab-ci-helper
+  - project: invenia/gitlab-ci-helper
     file: /templates/py-check.yml
-  - project: infrastructure/gitlab-ci-helper
+  - project: invenia/gitlab-ci-helper
     file: /templates/teardown.yml
 
 # py-check.yml will include "Code Format Check", and "Version Check"
@@ -16,8 +16,8 @@ include:
 "Test Python 3.7":
   extends: .test_3_7
 
-"Upload to PyPiCloud":
-  extends: .upload_to_pypicloud
+"Upload to Private PyPI":
+  extends: .upload_to_private_pypi
 
 "Test Docker Build (Linux 64-Bit)":
   stage: test
