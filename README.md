@@ -10,7 +10,7 @@ Zip up a python script (and its dependencies) so that it can be deployed to an A
 
 ## Installation
 
-Python Lambda Zipper requires Python 3.6 or higher, and [docker](https://gitlab.invenia.ca/invenia/wiki/blob/master/setup/docker.md).
+Python Lambda Zipper requires Python 3.6 or higher, and [docker](https://gitlab.invenia.ca/invenia/wiki/blob/master/dev/docker.md).
 
 Use `pip3` to install plz directly from gitlab:
 
