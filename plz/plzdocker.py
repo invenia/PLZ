@@ -1,7 +1,7 @@
 import logging
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
@@ -87,6 +87,7 @@ def start_docker_container(
                 binds={
                     f"{install_path.resolve()}": {"bind": "/root/deps"},
                     f"{Path.home()}/.ssh": {"bind": "/root/.ssh"},
+                    f"{Path.home()}/.pip": {"bind": "/root/.pip"},
                 }
             ),
         )
@@ -149,7 +150,12 @@ def stop_docker_container(client: docker.APIClient, container_name: str):
     logging.info("Container Successfully Removed")
 
 
-def pip_install(client: docker.APIClient, container_name: str, dependency: str):
+def pip_install(
+    client: docker.APIClient,
+    container_name: str,
+    dependency: str,
+    pip_args: Optional[List[str]] = None,
+):
     """
     Pip install the python `dependency` in the docker container `container_name`.
 
@@ -157,11 +163,13 @@ def pip_install(client: docker.APIClient, container_name: str, dependency: str):
         client (:obj:`docker.APIClient`): Docker APIClient object
         container_name (:obj:`str`): The name of the container to use
         dependency (:obj:`str`): The python library to install
+        pip_args (:obj:`Optional[dict[str, list[str]]]`): Additional pip install args.
 
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    cmd = ["pip", "install", "-t", "/root/deps", dependency]
+    install_args = pip_args if pip_args else []
+    cmd = ["pip", "install", "-t", "/root/deps", *install_args, dependency]
 
     logging.info(f"Pip Install {dependency}: {cmd}")
     run_docker_cmd(client, container_name, cmd, environment=["PYTHONPATH=/root/deps"])
