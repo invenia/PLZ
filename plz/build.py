@@ -5,11 +5,12 @@ import json
 import logging
 from pathlib import Path
 from shutil import copy2, copytree, rmtree
-from typing import Optional, Sequence, Union
+from typing import Dict, List, Optional, Sequence, Union
 from zipfile import ZipFile
 
 import docker  # type: ignore
 import yaml
+from pkg_resources import Requirement
 
 from .plzdocker import (
     build_docker_image,
@@ -32,6 +33,7 @@ def build_package(
     python_version: str = "3.7",
     zipped_prefix: Optional[Path] = None,
     force: bool = False,
+    pip_args: Optional[Dict[str, List[str]]] = None,
 ) -> Path:
     """
     Build a python package.
@@ -52,6 +54,8 @@ def build_package(
             all files in the package when zipping
         force (:obj:`bool`): Build the package even if a pre-built version already
             exists.
+        pip_args (:obj:`Optional[dict[str, list[str]]]`): A dict that maps the python
+            dependency names to a list of pip-install args.
 
     Raises:
         :obj:`BaseException`: If anything goes wrong
@@ -100,7 +104,7 @@ def build_package(
         if requirements or yum_requirements:
             env = build / "package-env"
             process_requirements(
-                requirements, yum_requirements, package, env, python_version
+                requirements, yum_requirements, package, env, python_version, pip_args
             )
 
         # Zip it all up
@@ -175,6 +179,7 @@ def process_requirements(
     package_path: Path,
     env: Path,
     python_version: str = "3.7",
+    pip_args: Optional[Dict[str, List[str]]] = None,
 ):
     """
     Using pip, install python requirements into a docker instance
@@ -188,6 +193,8 @@ def process_requirements(
         env (:obj:`pathlib.Path`): Path to docker environment to install packages to
         python_version (:obj:`str`): The version of Python to build for
             (<major>.<minor>), default: "3.7"
+        pip_args (:obj:`Optional[dict[str, list[str]]]`): A dict that maps the python
+            dependency names to a list of pip-install args.
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
@@ -198,12 +205,15 @@ def process_requirements(
     start_docker_container(client, container, env)
 
     try:
+        pip_args = pip_args if pip_args else {}
         # pip install all requirements files
         for r_file in requirements:
             with r_file.open() as f:
                 for line in f.readlines():
                     dep = line.strip()
-                    pip_install(client, container, dep)
+                    dep_parsed = Requirement.parse(dep)
+                    install_args = pip_args.get(dep_parsed.key, pip_args.get(dep, []))
+                    pip_install(client, container, dep, install_args)
 
         # Install epel from amazon-linux-extras if there are yum_requirements and the
         # Lambda runtime for the specified python version is "amazonlinux:2".
