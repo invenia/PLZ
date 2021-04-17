@@ -4,11 +4,12 @@ from pathlib import Path
 import docker
 import pytest
 
-from plz.cli import main as plz_main, parse_args
 from tests.helpers.util import MockAPIClient
 
 
 def test_parse_args():
+    from plz.cli import parse_args
+
     args = parse_args(["-r", "requirements.txt", "-p", "3.6", "test1.py", "testpath"])
     assert args.build == Path("./build")
     assert args.files == [Path("test1.py"), Path("testpath")]
@@ -25,6 +26,8 @@ def mock_api_client(monkeypatch):
 
 
 def test_main(mock_api_client, tmpdir):
+    from plz.cli import main
+
     build_path = Path(tmpdir / "build")
     build_path.mkdir()
 
@@ -32,6 +35,6 @@ def test_main(mock_api_client, tmpdir):
     with file_path.open("w") as f:
         f.write("#test")
 
-    plz_main(["--build", str(build_path), "--", str(file_path)])
+    main(["--build", str(build_path), "--", str(file_path)])
 
     assert (build_path / "package.zip").exists()

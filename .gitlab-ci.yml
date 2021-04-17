@@ -10,12 +10,6 @@ include:
 # py-check.yml will include "Code Format Check", and "Version Check"
 # teardown.yml will include "Coverage", "Documentation", and "pages"
 
-"Test Python 3.6":
-  extends: .test_3_6
-
-"Test Python 3.7":
-  extends: .test_3_7
-
 "Upload to Private PyPI":
   extends: .upload_to_private_pypi
 
@@ -31,5 +25,5 @@ include:
     - pip install tox
     - docker --version
   script:
-    - tox -e docker
+    - tox -e py38
     - deactivate

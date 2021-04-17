@@ -84,35 +84,72 @@ for file in ZipFile(package, "r").namelist():
 # utilities/ipsum.py
 ```
 
-You can also supply one or more yum requirements files for installing needed system packages:
+You can also supply one or more system requirements files for installing needed system packages:
 
 The yaml format for the yum requirements files is as follows:
 ```yaml
-packagename:
-  - [location of files to copy]
-  - [location of more files to copy]
-  - etc
-packagename2:
-  - [location of files to copy]
-etc
+version: 0.1.0
+packages:
+  <packagename>:
+    - <location of a file to copy>
+  <packagename2>:
+    - <location of a file to copy>
+    - <location of another file to copy>
+filetypes:  # optional
+  - <file extension to copy over>
+  - <another file extension>
+extra:  # optional
+  - <a package that you didn't install but want in the bundle>
+ignore:  # optional
+  - <a package you installed but don't want in the bundle>
 ```
 
 For example:
 ```yaml
-libpng:
-  - /usr/lib64/libpng15.so.15
-eccodes:
-  - /usr/lib64/libeccodes.so.0.1
-eccodes-data:
-  - /usr/share/eccodes/definitions
+version: 0.1.0
+packages:
+  libpng:
+    - /usr/lib64/libpng15.so.15
+  eccodes:
+    - /usr/lib64/libeccodes.so.0.1
+  eccodes-data:
+    - /usr/share/eccodes/definitions
+```
+
+If `filetypes` is provided (or no system files are needed in the actual bundle), `packages` can be provided as a list instead of a dictionary:
+
+```yaml
+version: 0.1.0
+filetypes:
+  - .so
+packages:
+  - libpng
+  - eccodes
+```
+
+If a package is only needed for installation, you can add it to a list of packages to skip when copying files:
+
+```yaml
+version: 0.1.0
+filetypes:
+  - .so
+packages:
+  - libpng
+  - eccodes
+skip:
+  - libpng
 ```
 
 ```python
-yum_requirements = Path("yum_requirements.yaml")
+system_requirements = Path("system_requirements.yaml")
 
-print(yum_requirements.read_text())  # libpng\n  - /usr/lib64/libpng15.so.15
+print(system_requirements.read_text())
+# version: 0.1.0
+# packages:
+#   libpng:
+#     - /usr/lib64/libpng15.so.15
 
-package = build_package(build_directory, script, utilities, yum_requirements=yum_requirements)
+package = build_package(build_directory, script, utilities, system_requirements=system_requirements)
 
 print(package)  # Path("./build/package.zip")
 for file in ZipFile(package, "r").namelist():

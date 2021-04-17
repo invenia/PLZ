@@ -3,19 +3,28 @@ Build a package
 """
 import json
 import logging
+import re
+from hashlib import sha256
 from pathlib import Path
-from shutil import copy2, copytree, rmtree
+from shutil import rmtree
+from subprocess import check_output
 from typing import Dict, List, Optional, Sequence, Union
+from uuid import uuid4
 from zipfile import ZipFile
 
 import docker  # type: ignore
 import yaml
 from pkg_resources import Requirement
 
-from .plzdocker import (
+from plz.plzdocker import (
+    BUILD_INFO_FILENAME,
+    DEFAULT_PYTHON,
+    INSTALL_PATH,
+    SUPPORTED_PYTHON,
     build_docker_image,
+    copy_system_packages,
+    delete_docker_image,
     pip_install,
-    run_docker_cmd,
     start_docker_container,
     stop_docker_container,
     yum_install,
@@ -25,15 +34,29 @@ from .plzdocker import (
 __all__ = ["build_package"]
 
 
+DOCKER_IMAGE_NAME = "plz-builder-{version}"
+PACKAGE_INFO_FILENAME = "package-info.json"
+PACKAGE_INFO_VERSION = "0.1.0"
+SYSTEM_REQUIREMENTS_VERSION = "0.1.0"
+
+
 def build_package(
     build: Path,
     *files: Path,
     requirements: Optional[Union[Sequence[Path], Path]] = None,
-    yum_requirements: Optional[Union[Sequence[Path], Path]] = None,
-    python_version: str = "3.7",
+    system_requirements: Optional[Path] = None,
+    python_version: str = DEFAULT_PYTHON,
+    reinstall_python: bool = False,
+    reinstall_system: bool = False,
+    freeze_dependencies: bool = False,
     zipped_prefix: Optional[Path] = None,
-    force: bool = False,
     pip_args: Optional[Dict[str, List[str]]] = None,
+    image_name: Optional[str] = None,
+    container_name: Optional[str] = None,
+    rebuild_image: bool = False,
+    rezip: bool = False,
+    no_secrets: bool = False,
+    force: bool = False,
 ) -> Path:
     """
     Build a python package.
@@ -45,141 +68,203 @@ def build_package(
         requirements (:obj:`Optional[Union[Sequence[pathlib.Path], pathlib.Path]]`):
             If given, a path to or a sequence of paths to requirements files to be
             installed.
-        yum_requirements (:obj:`Optional[Union[Sequence[pathlib.Path], pathlib.Path]]`):
-            If given, a path to or a sequence of paths to yum requirements yaml files to
-            be installed
+        system_requirements (:obj:`Optional[pathlib.Path]`): If given, a path to a yum
+            requirements yaml file to be installed
         python_version (:obj:`str`): The version of Python to build for
-            (<major>.<minor>), default: "3.7"
+            (<major>.<minor>), default: "3.8"
+        reinstall_python (:obj:`bool`): Reinstall python requirements.
+        reinstall_system (:obj:`bool`): Reinstall system requirements.
         zipped_prefix (:obj:`Optional[pathlib.Path`]): If given, a path to prepend to
             all files in the package when zipping
-        force (:obj:`bool`): Build the package even if a pre-built version already
-            exists.
         pip_args (:obj:`Optional[dict[str, list[str]]]`): A dict that maps the python
             dependency names to a list of pip-install args.
+        image_name (:obj:`str`): What to name the docker image for building the package
+        rebuild_image (:obj:`bool`): Delete any existing images with the same name
+        rezip (:obj:`bool`): Recreate the zip file even if nothing has changed.
+        no_secrets (:obj:`bool`): Download all python packages locally instead of
+            binding your .ssh directory and .pip file to the docker container.
+            If any or your packages depend on private dependencies, you will need
+            to manually specify them in the order they need to be deleted.
+        force: (:obj:`bool`): Force a complete rebuild
+
+    TODO: any additional work required to make the resulting container directly
+    usable by a lambda.
+
+    NOTE: plz doesn't handle removing existing dependencies that were removed
+    from a requirements list. You should set reinstall_python or
+    reinstall_system to true if you have python or system dependencies that
+    should be removed
 
     Raises:
         :obj:`BaseException`: If anything goes wrong
     """
-    zipfile = build / "package.zip"
-    build_info = build / "build-info.json"
-    package = build / "package"
+    if image_name is None:
+        image_name = DOCKER_IMAGE_NAME.format(version=python_version)
 
-    # Make sure requirements and yum_requirements are lists
+    if container_name is None:
+        f"{image_name}-container"
+
+    if python_version not in SUPPORTED_PYTHON:
+        logging.warning(
+            "Python version (%s) does not appear to be supported by AWS Lambda. "
+            "Currently supported versions: %s",
+            python_version,
+            ", ".join(sorted(SUPPORTED_PYTHON)),
+        )
+
+    if force:
+        reinstall_python = reinstall_system = rebuild_image = rezip = True
+    elif reinstall_system:
+        rebuild_image = True
+
+    build.mkdir(parents=True, exist_ok=True)
+
+    zipfile = build / "package.zip"
+    package_info = build / PACKAGE_INFO_FILENAME
+
+    # Make sure requirements is a list
     if requirements is None:
         requirements = []
     elif isinstance(requirements, Path):
         requirements = [requirements]
 
-    if yum_requirements is None:
-        yum_requirements = []
-    elif isinstance(yum_requirements, Path):
-        yum_requirements = [yum_requirements]
+    if package_info.exists():
+        with package_info.open("r") as stream:
+            info = json.load(stream)
+
+        if info.get("version") != PACKAGE_INFO_VERSION:
+            logging.info(
+                "Package info has incompatible version (expected %s, found %s).",
+                PACKAGE_INFO_VERSION,
+                info.get("version"),
+            )
+            info = {"version": PACKAGE_INFO_VERSION}
+    else:
+        info = {"version": PACKAGE_INFO_VERSION}
+
+    if container_name is None:
+        # Our image name is generic and may appear across multiple projects.
+        # If a container name isn't specified we should make sure it's unique
+        container_name = info.setdefault("container", f"{image_name}-{uuid4()}")
+    else:
+        info["container"] = container_name
+
+    python_hashes = _get_file_hashes(*requirements)
+    system_hashes = {}
+    if system_requirements:
+        system_hashes = _get_file_hashes(system_requirements)
 
     try:
-        info = {
-            "files": {str(f): _get_last_modified_timestamp(f) for f in files},
-            "requirements": {
-                str(f): _get_last_modified_timestamp(f) for f in requirements
-            },
-            "yum_requirements": {
-                str(f): _get_last_modified_timestamp(f) for f in yum_requirements
-            },
-            "zipped_prefix": str(zipped_prefix),
-        }
-
-        if build_info.exists():
-            with build_info.open("rb") as stream:
-                old_info = json.load(stream)
-        else:
-            old_info = {}
-
-        # Just return the zipfile path, if there is no new work to do on it
-        if not force and info == old_info:
-            return zipfile
-
-        # Copy the included files into the package dir
-        copy_included_files(build, build_info, info, package, *files)
-
-        # Process requirements files if they exist
-        if requirements or yum_requirements:
-            env = build / "package-env"
+        if (
+            rebuild_image
+            or reinstall_python
+            or reinstall_system
+            or info.get("python", {}) != python_hashes
+            or info.get("system", {}) != system_hashes
+        ):
             process_requirements(
-                requirements, yum_requirements, package, env, python_version, pip_args
+                requirements,
+                system_requirements,
+                build,
+                python_version=python_version,
+                pip_args=pip_args,
+                image_name=image_name,
+                container_name=container_name,
+                no_secrets=no_secrets,
+                rebuild_image=rebuild_image,
+                reinstall_python=reinstall_python,
+                reinstall_system=reinstall_system,
             )
+            rezip = True
 
-        # Zip it all up
-        zip_package(zipfile, package, zipped_prefix=zipped_prefix)
-    except BaseException:
-        # If _anything_ goes wrong, we need to rebuild, so kill
-        # build_info.
-        logging.error("Build Package Failed. See Traceback for Error")
-        if build_info.exists():
-            build_info.unlink()
+        file_hashes = _get_file_hashes(*files)
+        if (
+            rezip
+            or info.get("prefix") != zipped_prefix
+            or info.get("files", {}) != file_hashes
+            or not zipfile.exists()
+            or info.get("zip") != _get_file_hash(zipfile)
+        ):
+            all_files: List[Path] = []
+
+            for component, hashes in (
+                ("system", system_hashes),
+                ("python", python_hashes),
+            ):
+                directory = build / component
+                if hashes and directory.exists():
+                    all_files.append(directory)
+                    info[component] = hashes
+
+            all_files.extend(files)
+            info["files"] = file_hashes
+
+            zip_package(zipfile, *all_files, zipped_prefix=zipped_prefix)
+            info["prefix"] = zipped_prefix
+            info["zip"] = _get_file_hash(zipfile)
+    except Exception:
+        logging.exception("Error while building zip file")
+
+        # We're blanking values on error and writing the file instead of just
+        # deleting the file because the image/container may be fine and we
+        # don't want to just throw that out. build_info will mark the container
+        # as bad if an error occurred that effects the container.
+        info["system"] = {}
+        info["python"] = {}
+        info["files"] = {}
+        info["prefix"] = None
+        info["zip"] = None
+
+        if zipfile.exists():
+            zipfile.unlink()
+
         raise
+    finally:
+        with package_info.open("w") as stream:
+            json.dump(info, stream, sort_keys=True, indent=4)
 
     return zipfile
 
 
-def _get_last_modified_timestamp(path: Path):
+def _get_file_hashes(*paths: Path) -> Dict[str, str]:
     """
-    Return the last modified time of the file or directory pointed to by path
+    Return a dictionary of hashes for all files in a file tree.
 
     Args:
-        path (:obj:`pathlib.Path`): The file/directory to get the last modified time
-            from.
+        path (:obj:`pathlib.Path`): The files/directories to get the last
+            modified time from.
     """
-    last_modified = int(path.stat().st_mtime)
+    hashes = {}
+    remaining = list(paths)
+    while remaining:
+        path = remaining.pop()
 
-    if path.is_dir():
-        directory_last_modified = max(
-            (_get_last_modified_timestamp(p) for p in path.iterdir()), default=None
-        )
+        if path.is_file():
+            hashes[str(path)] = _get_file_hash(path)
+        elif path.is_dir():
+            remaining.extend(path.iterdir())
 
-        if directory_last_modified is not None:
-            last_modified = max(last_modified, directory_last_modified)
-
-    return last_modified
+    return hashes
 
 
-def copy_included_files(
-    build_path: Path, build_info: Path, info: dict, package_path: Path, *files: Path
-):
-    """
-    Copy the files and dirs pointed to by `*files` into the build_path
-
-    Args:
-        build_path (:obj:`pathlib.Path`): The main build directory
-        build_info (:obj:`pathlib.Path`): The path to the build-info.json file
-        info (:obj:`dict`): The build-info
-        package_path (:obj:`pathlib.Path`): The path to the resulting package directory
-        *files (:obj:`pathlib.Path`): The files/dirs to copy
-    """
-    # Make sure the main build directory is created
-    build_path.mkdir(parents=True, exist_ok=True)
-    with build_info.open("w") as stream:
-        json.dump(info, stream)
-
-    # Delete the package path if it exists, and recreate it
-    if package_path.exists():
-        rmtree(package_path)
-    package_path.mkdir()
-
-    # For each file or dir, copy it into the package_path.
-    for path in files:
-        destination = package_path / path.name
-        if path.is_dir():
-            copytree(path, destination)
-        else:
-            copy2(path, destination)
+def _get_file_hash(path: Path) -> str:
+    with path.open("rb") as stream:
+        return sha256(stream.read()).hexdigest()
 
 
 def process_requirements(
     requirements: Sequence[Path],
-    yum_requirements: Sequence[Path],
-    package_path: Path,
-    env: Path,
-    python_version: str = "3.7",
+    system_requirements: Optional[Path],
+    build: Path,
+    image_name: str,
+    container_name: str,
+    *,
+    python_version: str = DEFAULT_PYTHON,
     pip_args: Optional[Dict[str, List[str]]] = None,
+    no_secrets: bool = False,
+    rebuild_image: bool = False,
+    reinstall_python: bool = False,
+    reinstall_system: bool = False,
 ):
     """
     Using pip, install python requirements into a docker instance
@@ -187,112 +272,272 @@ def process_requirements(
     Args:
         requirements (:obj:`Sequence[pathlib.Path]`): Paths to requirements files to
             install
-        yum_requirements (:obj:`Sequence[pathlib.Path]`): Paths to yum requirements yaml
-            files to install
-        package_path (:obj:`pathlib.Path`): Path to resulting package dir
-        env (:obj:`pathlib.Path`): Path to docker environment to install packages to
+        system_requirements (:obj:`Optional[pathlib.Path]`): Path to system
+            requirements yaml file to install
+        build (:obj:`pathlib.Path`): Path to the directory to build in.
+        image_name (:obj:`str`): What to name the docker image for building the package
+        container_name (:obj:`str`): What to name the docker container for building the
+            package
         python_version (:obj:`str`): The version of Python to build for
-            (<major>.<minor>), default: "3.7"
+            (<major>.<minor>), default: "3.8"
         pip_args (:obj:`Optional[dict[str, list[str]]]`): A dict that maps the python
             dependency names to a list of pip-install args.
+        no_secrets (:obj:`bool`): Download all python packages locally instead of
+            binding your .ssh directory and .pip file to the docker container.
+            If any or your packages depend on private dependencies, you will need
+            to manually specify them in the order they need to be deleted.
+        rebuild_image (:obj:`bool`): Delete any existing images with the same name
+        reinstall_python (:obj:`bool`): Reinstall python requirements.
+        reinstall_system (:obj:`bool`): Reinstall system requirements.
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
     """
-    client = docker.APIClient()
-    container = "plz-container"
-    build_docker_image(client, python_version)
-    start_docker_container(client, container, env)
+    build.mkdir(parents=True, exist_ok=True)
+    build_info = build / BUILD_INFO_FILENAME
 
     try:
-        pip_args = pip_args if pip_args else {}
-        # pip install all requirements files
-        for r_file in requirements:
-            with r_file.open() as f:
-                for line in f.readlines():
-                    dep = line.strip()
-                    dep_parsed = Requirement.parse(dep)
-                    install_args = pip_args.get(dep_parsed.key, pip_args.get(dep, []))
-                    pip_install(client, container, dep, install_args)
+        client = docker.APIClient()
+    except docker.errors.APIError:
+        logging.exception(
+            "Accessing Docker failed. Ensure Docker is installed and running, and that "
+            "internet access is available for the first run. "
+            "Installation cannot proceed."
+        )
+        raise
 
-        # Install epel from amazon-linux-extras if there are yum_requirements and the
-        # Lambda runtime for the specified python version is "amazonlinux:2".
-        #
-        # As of python 3.8, the AWS Lambda runtime has switched to "amazonlinux:2"
-        # see https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html
-        # Note: The "amazonlinux" runtime used for older python versions does not
-        # contain amazon-linux-extras
-        version_tuple = tuple(map(int, python_version.split(".", 1)))
-        if yum_requirements and version_tuple >= (3, 8):
-            run_docker_cmd(
+    if rebuild_image and client.images(name=image_name):
+        delete_docker_image(client, image_name)
+
+    if not client.images(name=image_name):
+        build_docker_image(client, python_version=python_version, image_name=image_name)
+
+    container_id = start_docker_container(
+        client,
+        container_name,
+        build,
+        image_name=image_name,
+        no_secrets=no_secrets,
+        python_version=python_version,
+        fresh=reinstall_system,
+    )
+
+    with build_info.open("r") as stream:
+        info = json.load(stream)
+
+    try:
+        system_dependencies = build / "system"
+        if system_dependencies.exists() and (
+            reinstall_system or not system_requirements
+        ):
+            rmtree(system_dependencies)
+            info["system-packages"] = {}
+
+        if system_requirements:
+            system_dependencies.mkdir(parents=True, exist_ok=True)
+            with system_requirements.open() as stream:
+                data = yaml.safe_load(stream)
+
+                if data.get("version") != SYSTEM_REQUIREMENTS_VERSION:
+                    raise ValueError(
+                        "Unsupported system requirements file version. "
+                        f"Expected {SYSTEM_REQUIREMENTS_VERSION}. "
+                        f"Found: {data.get('version')}"
+                    )
+
+                skip = set(data.get("skip", []))
+                include = set()
+
+                for package in data["packages"]:
+                    yum_install(client, container_id, package)
+
+                    if package not in skip:
+                        include.add(package)
+
+            kwargs = {}
+
+            if "filetypes" in data:
+                kwargs["desired_filetypes"] = data["filetypes"]
+
+            if isinstance(data["packages"], dict):
+                kwargs["desired_files"] = data["packages"]
+
+            copy_system_packages(
                 client,
-                container,
-                # Note: If we don't set the python version to python2 then the epel
-                # install will fail
-                ["env", "PYTHON=python2", "amazon-linux-extras", "install", "epel"],
+                container_id,
+                info["base-packages"],
+                installed_packages=info["system-packages"],
+                skip=skip,
+                include=include,
+                **kwargs,
             )
 
-        # yum install all yum_requirements
-        for y_file in yum_requirements:
-            with y_file.open() as f:
-                data = yaml.safe_load(f)
-                for key in data:
-                    paths = list(map(Path, data[key]))
-                    yum_install(client, container, key, paths)
+        python_dependencies = build / "python"
+        if python_dependencies.exists() and (reinstall_python or not requirements):
+            rmtree(python_dependencies)
+            info["python-packages"] = {}
 
+        if requirements:
+            python_dependencies.mkdir(parents=True, exist_ok=True)
+            if no_secrets:
+                download_directory = build / "pip-downloads"
+                if download_directory.exists():
+                    rmtree(download_directory)
+                download_directory.mkdir(exist_ok=True)
+                docker_download_directory = INSTALL_PATH / download_directory.name
+
+            if pip_args is None:
+                pip_args = {}
+
+            # pip install all requirements files
+            for path in requirements:
+                with path.open() as stream:
+                    for line in stream.readlines():
+                        requirement_line = line.strip()
+
+                        # ignore comments and blank names
+                        if not requirement_line or re.search(
+                            r"^\s*#", requirement_line
+                        ):
+                            continue
+
+                        # Pip supports a private repository across a number of
+                        # version control systems:
+                        # https://pip.pypa.io/en/stable/reference/pip_install/#vcs-support
+                        # This is an attempt at a maximally-permissive regex that will
+                        # find the name of a package. As such, this will have some false
+                        # positives (that shouldn't be a problem because no real pypi
+                        # name starts vcs+protocol:). It can also break on a project
+                        # named `trunk` if the protocol isn't included as an extension
+                        # for the project and #egg=name isn't specified.
+                        match = re.search(
+                            # bzr+lp, which we'll never see, doesn't use the slashes
+                            r"^(\w+)\+\w+:(?://)?"  # vcs + protocol
+                            r"(?:\w+(?::[^@]+)?@)?"  # user + password
+                            r"(?:[^/#@]+/)+"  # domain/path
+                            r"([^/#@.]+)"  # project
+                            r"(?:\.\1)?"  # name may include vcs as extension
+                            r"(?:/trunk)?"  # svn may have trunk after project
+                            # may have a reference (branch, tag, etc.) to check out
+                            r"(?:@[^#]+)?"
+                            r"(?:#egg=(.+))?$",  # actual package name may be supplied
+                            requirement_line,
+                        )
+
+                        requirement = None
+                        if match:
+                            _, project, egg = match.groups()
+
+                            name = egg or project
+                            key = name.lower()
+                        else:
+                            try:
+                                requirement = Requirement.parse(requirement_line)
+                            except Exception:
+                                logging.info(
+                                    "Unable to parse requirement %s",
+                                    requirement_line,
+                                    exc_info=True,
+                                )
+                                name = requirement_line
+                                key = name.lower()
+                            else:
+                                name = requirement.project_name
+                                key = requirement.key
+
+                                version = info["python-packages"].get(name)
+                                if version and version in requirement:
+                                    # We can skip reinstalling
+                                    continue
+
+                        # Allow people to specify args by the full line, the name,
+                        # or the lowercased name. Search most-to-least specific
+                        install_args = pip_args.get(
+                            requirement_line, pip_args.get(name, pip_args.get(key, []))
+                        )
+
+                        if no_secrets:
+                            cmd = [
+                                "pip",
+                                "download",
+                                "--dest",
+                                str(download_directory),
+                                "--platform",
+                                # TODO: expose this?
+                                "linux_x86_64",
+                                "--abi",
+                                f"cp{python_version.replace('.', '')}",
+                                "--python-version",
+                                python_version,
+                                "--no-deps",
+                                requirement_line,
+                            ]
+                            logging.info("Downloading package: %s", cmd)
+                            for line in check_output(cmd, text=True).splitlines():
+                                match = re.search(
+                                    r"^(?:Saved|\s*File was already downloaded) (.*?)$",
+                                    line,
+                                )
+                                if match:
+                                    location = Path(match.group(1))
+
+                                    requirement_line = str(
+                                        docker_download_directory / location.name
+                                    )
+                                    break
+                            else:
+                                raise ValueError(f"downloading {name} failed")
+
+                        info["python-packages"][name] = pip_install(
+                            client,
+                            container_id,
+                            requirement_line,
+                            install_args,
+                            name=name,
+                        )
+
+    except Exception:
+        logging.exception("Error occurred while installing dependencies")
+        raise
     finally:
-        stop_docker_container(client, container)
-
-    # Copy the libs to the package
-    has_copied = False
-    for path in env.iterdir():
-        destination = package_path / path.name
-        if not destination.exists():
-            logging.debug(f"Copying {destination}")
-            has_copied = True
-            if path.is_dir():
-                copytree(path, destination)
-            else:
-                copy2(path, destination)
-
-    # If we haven't copied any files, raise an error because if we've installed
-    # something from a requirements.txt file, then we should have copied some files over
-    if not has_copied:
-        logging.error("Error: No files were copied after requirements processing.")
-        raise FileNotFoundError()
+        with build_info.open("w") as stream:
+            json.dump(info, stream, sort_keys=True, indent=4)
+        stop_docker_container(client, container_id)
 
 
-def zip_package(
-    zipfile_path: Path, package_path: Path, zipped_prefix: Optional[Path] = None
-):
+def zip_package(zipfile_path: Path, *files: Path, zipped_prefix: Optional[Path] = None):
     """
     Zip up files/dirs and python packages
 
     Args:
         zipfile_path (:obj:`pathlib.Path`): The path to the zipfile you want to make
-        package_path (:obj:`pathlib.Path`): The path to the package to be zipped
+        files (:obj:`pathlib.Path`): The files to be zipped
         zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
             resulting zip file
     """
+    ignore = {"__pycache__", ".DS_Store"}
+    ignore_type = {".dist-info"}
     # Delete unnecessary dirs
-    for cache_dir in package_path.glob("**/__pycache__"):
-        rmtree(cache_dir)
-
-    for dist_dir in package_path.glob("**/*.dist-info"):
-        rmtree(dist_dir)
-
     with ZipFile(zipfile_path, "w") as z:
-        directories = [package_path]
+        remaining = []
+        for file in files:
+            file = file.absolute()
+            if file.is_file():
+                remaining.append((file, file.parent))
+            else:
+                remaining.append((file, file))
 
-        while directories:
-            directory = directories.pop()
+        while remaining:
+            path, relative_to = remaining.pop(0)
 
-            for path in directory.iterdir():
-                if path.is_dir():
-                    directories.append(path)
-                else:
-                    destination = path.relative_to(package_path)
-                    if zipped_prefix:
-                        destination = zipped_prefix / destination
-                    logging.debug(f"Archiving {path} to {destination}")
-                    z.write(path, destination)
+            if path.name in ignore or path.suffix in ignore_type:
+                continue
+
+            if path.is_dir():
+                remaining.extend((child, relative_to) for child in path.iterdir())
+            else:
+                destination = path.relative_to(relative_to)
+                if zipped_prefix:
+                    destination = zipped_prefix / destination
+                logging.debug(f"Archiving {path} to {destination}")
+                z.write(path, destination)
