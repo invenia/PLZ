@@ -180,7 +180,6 @@ def test_process_requirements(tmp_path):
                 "  - libwebp\n"
             )
 
-        print("---------------")
         process_requirements(
             (requirements,),
             system_requirements,
@@ -309,6 +308,7 @@ def test_process_requirements(tmp_path):
             python_version="3.7",
             no_secrets=True,
             reinstall_python=True,
+            pip_args={"plz": ["--no-use-pep517"]},
         )
 
         build_info = build_path / "build-info.json"
@@ -656,6 +656,7 @@ def test_build_package(tmp_path):
             requirements=requirements,
             python_version="3.7",
             no_secrets=True,
+            pip_args={"plz": ["--no-use-pep517"]},
         )
         assert zipfile == build_path / "package.zip"
 
