@@ -17,6 +17,7 @@ HOME_PATH = PurePosixPath("/root")
 INSTALL_PATH = HOME_PATH / "dependencies"
 PYTHON_INSTALL_PATH = INSTALL_PATH / "python"
 SYSTEM_INSTALL_PATH = INSTALL_PATH / "system"
+ENVIRONMENT = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
 
 
 DOCKER_IMAGE_INFO = "/image-info.json"
@@ -384,10 +385,9 @@ def pip_install(
         *pip_args,
         requirement,
     ]
-    environment = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
 
     logging.info("Pip Install %s: %s", requirement, cmd)
-    run_docker_command(client, container_id, cmd, environment=environment)
+    run_docker_command(client, container_id, cmd, environment=ENVIRONMENT)
     logging.info("Pip Install Complete")
 
     # pip show is often wrong if a package has been downgraded so try
@@ -398,7 +398,7 @@ def pip_install(
                 client,
                 container_id,
                 ["python", "-c", f"import {name};print({name}.__version__)"],
-                environment=environment,
+                environment=ENVIRONMENT,
             ).strip()
         except Exception:
             # package may not provide __version__. name may not be module
@@ -411,7 +411,7 @@ def pip_install(
 
         try:
             result = run_docker_command(
-                client, container_id, ["pip", "show", name], environment=environment
+                client, container_id, ["pip", "show", name], environment=ENVIRONMENT
             )
 
             for line in result.splitlines():
@@ -424,6 +424,27 @@ def pip_install(
             logging.exception("Unable to work out installed version for %s", name)
 
     return version
+
+
+def pip_freeze(client: docker.APIClient, container_id: str, path: Path):
+    """
+    Create a freeze file.
+
+    Args:
+        client (:obj:`docker.APIClient`): Docker APIClient object
+        container_id (:obj:`str`): The id of the container to use
+
+    Raises:
+        :obj:`docker.errors.APIError`: If any docker error occurs
+    """
+    requirements = run_docker_command(
+        client,
+        container_id,
+        ["pip", "freeze", "--path", str(PYTHON_INSTALL_PATH)],
+        environment=ENVIRONMENT,
+    )
+    with path.open("w") as stream:
+        stream.write(requirements)
 
 
 def yum_install(
@@ -658,6 +679,24 @@ def _delete_system_files(client: docker.APIClient, container_id: str, files: Lis
             )
         except Exception:
             logging.exception("Failed to delete file %s", filename)
+
+
+def fix_file_permissions(client: docker.APIClient, container_id: str):
+    """
+    Make all files in the dependencies directory readable
+
+    Args:
+        client (:obj:`docker.APIClient`): Docker APIClient object
+        container_id (:obj:`str`): The id of the container to use
+
+    Raises:
+        :obj:`docker.errors.APIError`: If any docker error occurs
+    """
+    run_docker_command(
+        client,
+        container_id,
+        ["find", str(INSTALL_PATH), "-exec", "chmod", "a+r", "{}", ";"],
+    )
 
 
 def run_docker_command(

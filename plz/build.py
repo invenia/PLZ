@@ -4,11 +4,12 @@ Build a package
 import json
 import logging
 import re
+import sys
 from hashlib import sha256
 from pathlib import Path
 from shutil import rmtree
 from subprocess import check_output
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Dict, List, Optional, Sequence, Set, Union
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -24,6 +25,8 @@ from plz.plzdocker import (
     build_docker_image,
     copy_system_packages,
     delete_docker_image,
+    fix_file_permissions,
+    pip_freeze,
     pip_install,
     start_docker_container,
     stop_docker_container,
@@ -55,6 +58,10 @@ CROSS_ARGUMENTS = {
     "--abi": 1,
 }
 
+# lambdas are guaranteed to have boto3/botocore
+IGNORE = {"__pycache__", "boto3", "botocore"}
+IGNORE_FILETYPES = {".dist-info", ".egg-info", ".pyc"}
+
 
 def build_package(
     build: Path,
@@ -73,6 +80,9 @@ def build_package(
     rezip: bool = False,
     no_secrets: bool = False,
     force: bool = False,
+    freeze: bool = False,
+    ignore: Set[str] = IGNORE,
+    ignore_filetypes: Set[str] = IGNORE_FILETYPES,
 ) -> Path:
     """
     Build a python package.
@@ -101,7 +111,10 @@ def build_package(
             binding your .ssh directory and .pip file to the docker container.
             If any or your packages depend on private dependencies, you will need
             to manually specify them in the order they need to be deleted.
-        force: (:obj:`bool`): Force a complete rebuild
+        force (:obj:`bool`): Force a complete rebuild
+        freeze (:obj:`bool`): Create a pip freeze file.
+        ignore (:obj:`Set[str]`): Files to ignore when packaging the zip.
+        ignore_filetypes (:obj:`Set[str]`): Filetypes to ignore when packaging the zip.
 
     TODO: any additional work required to make the resulting container directly
     usable by a lambda.
@@ -190,6 +203,7 @@ def build_package(
                 rebuild_image=rebuild_image,
                 reinstall_python=reinstall_python,
                 reinstall_system=reinstall_system,
+                freeze=freeze,
             )
             rezip = True
 
@@ -215,7 +229,13 @@ def build_package(
             all_files.extend(files)
             info["files"] = file_hashes
 
-            zip_package(zipfile, *all_files, zipped_prefix=zipped_prefix)
+            zip_package(
+                zipfile,
+                *all_files,
+                zipped_prefix=zipped_prefix,
+                ignore=ignore,
+                ignore_filetypes=ignore_filetypes,
+            )
             info["prefix"] = zipped_prefix
             info["zip"] = _get_file_hash(zipfile)
     except Exception:
@@ -281,6 +301,7 @@ def process_requirements(
     rebuild_image: bool = False,
     reinstall_python: bool = False,
     reinstall_system: bool = False,
+    freeze: bool = False,
 ):
     """
     Using pip, install python requirements into a docker instance
@@ -305,6 +326,7 @@ def process_requirements(
         rebuild_image (:obj:`bool`): Delete any existing images with the same name
         reinstall_python (:obj:`bool`): Reinstall python requirements.
         reinstall_system (:obj:`bool`): Reinstall system requirements.
+        freeze (:obj:`bool`): Create a pip freeze file.
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
@@ -520,6 +542,15 @@ def process_requirements(
                             name=name,
                         )
 
+        if freeze:
+            pip_freeze(client, container_id, build / "frozen-requirements.txt")
+
+        # on non-mac platforms, we need to give the host system
+        # permission to read container-created files in the shared
+        # directory
+        if sys.platform != "darwin":
+            fix_file_permissions(client, container_id)
+
     except Exception:
         logging.exception("Error occurred while installing dependencies")
         raise
@@ -529,7 +560,13 @@ def process_requirements(
         stop_docker_container(client, container_id)
 
 
-def zip_package(zipfile_path: Path, *files: Path, zipped_prefix: Optional[Path] = None):
+def zip_package(
+    zipfile_path: Path,
+    *files: Path,
+    zipped_prefix: Optional[Path] = None,
+    ignore: Optional[Set[str]] = None,
+    ignore_filetypes: Optional[Set[str]] = None,
+):
     """
     Zip up files/dirs and python packages
 
@@ -538,9 +575,15 @@ def zip_package(zipfile_path: Path, *files: Path, zipped_prefix: Optional[Path] 
         files (:obj:`pathlib.Path`): The files to be zipped
         zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
             resulting zip file
+        ignore (:obj:`Optional[Set[str]])`): Ignore any files with these names
+        ignore_filetypes
     """
-    ignore = {"__pycache__", ".DS_Store"}
-    ignore_type = {".dist-info"}
+    if ignore is None:
+        ignore = IGNORE
+
+    if ignore_filetypes is None:
+        ignore_filetypes = IGNORE_FILETYPES
+
     # Delete unnecessary dirs
     with ZipFile(zipfile_path, "w") as z:
         remaining = []
@@ -554,13 +597,18 @@ def zip_package(zipfile_path: Path, *files: Path, zipped_prefix: Optional[Path] 
         while remaining:
             path, relative_to = remaining.pop(0)
 
-            if path.name in ignore or path.suffix in ignore_type:
+            destination = path.relative_to(relative_to)
+
+            if (
+                path.name in ignore
+                or destination in ignore
+                or path.suffix in ignore_filetypes
+            ):
                 continue
 
             if path.is_dir():
                 remaining.extend((child, relative_to) for child in path.iterdir())
             else:
-                destination = path.relative_to(relative_to)
                 if zipped_prefix:
                     destination = zipped_prefix / destination
                 logging.debug(f"Archiving {path} to {destination}")
