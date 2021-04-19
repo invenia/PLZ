@@ -84,6 +84,9 @@ def delete_docker_image(
 
     If stop_containers is True, existing containers will first be
     stopped and shut down
+
+    NOTE: docker's api doesn't actually seem to consistently error if
+    # a container is still running
     """
     if stop_containers:
         # if we're deleting them, we can just force them to quit

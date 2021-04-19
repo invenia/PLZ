@@ -59,12 +59,6 @@ def test_delete_docker_image():
         )["Id"]
         client.start(container_id)
 
-        # should fail if containers are running
-        with pytest.raises(APIError):
-            delete_docker_image(client, image_name, stop_containers=False)
-        assert len(client.containers(filters={"ancestor": image_name}, all=True)) > 0
-        assert len(client.images(name=image_name)) == 1
-
         build_docker_image(client, other_image_name)
         client.create_container(other_image_name, "/bin/bash", detach=True, tty=True)
         delete_docker_image(client, other_image_name, stop_containers=False)
