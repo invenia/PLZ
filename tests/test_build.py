@@ -690,6 +690,7 @@ def test_build_package(tmp_path):
             requirements=requirements,
             python_version="3.7",
             no_secrets=True,
+            pip_args={"plz": ["--no-use-pep517"]},
         )
         assert zipfile == build_path / "package.zip"
         assert zipfile.stat().st_mtime == mtime
@@ -711,6 +712,7 @@ def test_build_package(tmp_path):
             python_version="3.8",
             no_secrets=True,
             force=True,
+            pip_args={"plz": ["--no-use-pep517"]},
         )
         assert zipfile == build_path / "package.zip"
         assert zipfile.stat().st_mtime != mtime
