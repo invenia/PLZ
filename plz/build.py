@@ -499,7 +499,7 @@ def process_requirements(
                             logging.info("Downloading package: %s", cmd)
                             for line in check_output(cmd, text=True).splitlines():
                                 match = re.search(
-                                    r"^(?:Saved|\s*File was already downloaded) (.*?)$",
+                                    r"^\s*(?:Saved|File was already downloaded) (.*?)$",
                                     line,
                                 )
                                 if match:
