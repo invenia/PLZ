@@ -86,7 +86,7 @@ for file in ZipFile(package, "r").namelist():
 
 You can also supply one or more system requirements files for installing needed system packages:
 
-The yaml format for the yum requirements files is as follows:
+The yaml format for the system requirements files is as follows:
 ```yaml
 version: 0.1.0
 packages:
