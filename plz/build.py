@@ -39,6 +39,22 @@ PACKAGE_INFO_FILENAME = "package-info.json"
 PACKAGE_INFO_VERSION = "0.1.0"
 SYSTEM_REQUIREMENTS_VERSION = "0.1.0"
 
+# Arguments used for both download and install
+CROSS_ARGUMENTS = {
+    "--no-deps": 0,
+    "--no-binary": 1,
+    "--only-binary": 1,
+    "--prefer-binary": 0,
+    "--pre": 0,
+    "--require-hashes": 0,
+    "--no-build-isolation": 0,
+    "--use-pep517": 0,
+    "--no-use-pep517": 0,
+    "--platform": 1,
+    "--implementation": 1,
+    "--abi": 1,
+}
+
 
 def build_package(
     build: Path,
@@ -462,16 +478,24 @@ def process_requirements(
                                 "download",
                                 "--dest",
                                 str(download_directory),
-                                "--platform",
-                                # TODO: expose this?
-                                "linux_x86_64",
-                                "--abi",
-                                f"cp{python_version.replace('.', '')}",
-                                "--python-version",
-                                python_version,
-                                "--no-deps",
-                                requirement_line,
                             ]
+
+                            for index, argument in enumerate(install_args):
+                                if argument in CROSS_ARGUMENTS:
+                                    end_index = index + CROSS_ARGUMENTS[argument] + 1
+                                    cmd.extend(install_args[index:end_index])
+
+                            for argset in (
+                                ("--platform", "linux_x86_64"),
+                                ("--abi", f"cp{python_version.replace('.', '')}"),
+                                ("--python-version", python_version),
+                                ("--no-deps",),
+                            ):
+                                if argset[0] not in cmd:
+                                    cmd.extend(argset)
+
+                            cmd.append(requirement_line)
+
                             logging.info("Downloading package: %s", cmd)
                             for line in check_output(cmd, text=True).splitlines():
                                 match = re.search(
