@@ -25,5 +25,5 @@ include:
     - pip install tox
     - docker --version
   script:
-    - tox -e py38
+    - tox -e py37
     - deactivate
