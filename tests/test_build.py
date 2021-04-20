@@ -778,8 +778,6 @@ def test_build_package(tmp_path):
         directory = tmp_path / "package"
         ZipFile(zipfile).extractall(directory)
 
-        print(list(directory.iterdir()))
-
         for file in files:
             if file.is_file():
                 assert (directory / file.relative_to(files_path)).exists()

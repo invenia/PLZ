@@ -221,7 +221,12 @@ def build_package(
                 ("system", system_hashes),
                 ("python", python_hashes),
             ):
-                directory = build / component
+                # workaround for windows not having symbolic links
+                if sys.platform == "win32":
+                    directory = build / f"{sys.platform}-{component}"
+                else:
+                    directory = build / component
+
                 if hashes and directory.exists():
                     all_files.append(directory)
                     info[component] = hashes
@@ -545,11 +550,7 @@ def process_requirements(
         if freeze:
             pip_freeze(client, container_id, build / "frozen-requirements.txt")
 
-        # on non-mac platforms, we need to give the host system
-        # permission to read container-created files in the shared
-        # directory
-        if sys.platform != "darwin":
-            fix_file_permissions(client, container_id)
+        fix_file_permissions(client, container_id)
 
     except Exception:
         logging.exception("Error occurred while installing dependencies")

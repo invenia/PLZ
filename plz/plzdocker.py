@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import sys
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List, Optional, Sequence, Union, cast
@@ -18,6 +19,8 @@ INSTALL_PATH = HOME_PATH / "dependencies"
 PYTHON_INSTALL_PATH = INSTALL_PATH / "python"
 SYSTEM_INSTALL_PATH = INSTALL_PATH / "system"
 ENVIRONMENT = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
+WINDOWS_PYTHON_PATH = INSTALL_PATH / "win32-python"
+WINDOWS_SYSTEM_PATH = HOME_PATH / "win32-system"
 
 
 DOCKER_IMAGE_INFO = "/image-info.json"
@@ -683,7 +686,14 @@ def _delete_system_files(client: docker.APIClient, container_id: str, files: Lis
 
 def fix_file_permissions(client: docker.APIClient, container_id: str):
     """
-    Make all files in the dependencies directory readable
+    Make all files in the dependencies directory readable on the host.
+    On linux this just requires adding read permissions to files (a
+    future change would be to set the docker user's user/group id so
+    this isn't required). On Windows, we also need to replace symbolic
+    links (for now we're doing a workaround where we copy files to a
+    second directory that code just needs to know about. We can clean
+    this up if we ever officially need to support windows). On Mac,
+    where shared directories used NFS, no fixes are required.
 
     Args:
         client (:obj:`docker.APIClient`): Docker APIClient object
@@ -692,11 +702,38 @@ def fix_file_permissions(client: docker.APIClient, container_id: str):
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
+    if sys.platform == "darwin":  # "It just works"
+        return
+
     run_docker_command(
         client,
         container_id,
-        ["find", str(INSTALL_PATH), "-exec", "chmod", "a+r", "{}", ";"],
+        [
+            "find",
+            str(PYTHON_INSTALL_PATH),
+            str(SYSTEM_INSTALL_PATH),
+            "-exec",
+            "chmod",
+            "a+r",
+            "{}",
+            ";",
+        ],
     )
+
+    if sys.platform == "win32":  # seems to be this even on 64-bit installs
+        # windows can't handle symbolic links so copy, resolving all links
+        # into a windows-specific directory.
+
+        for source, windows in (
+            (PYTHON_INSTALL_PATH, WINDOWS_PYTHON_PATH),
+            (SYSTEM_INSTALL_PATH, WINDOWS_SYSTEM_PATH),
+        ):
+            run_docker_command(client, container_id, ["rm", "-rf", str(windows)])
+            print(run_docker_command(
+                client,
+                container_id,
+                ["cp", "-R", "-L", str(source), str(windows)],
+            ))
 
 
 def run_docker_command(
