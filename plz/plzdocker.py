@@ -20,7 +20,7 @@ PYTHON_INSTALL_PATH = INSTALL_PATH / "python"
 SYSTEM_INSTALL_PATH = INSTALL_PATH / "system"
 ENVIRONMENT = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
 WINDOWS_PYTHON_PATH = INSTALL_PATH / "win32-python"
-WINDOWS_SYSTEM_PATH = HOME_PATH / "win32-system"
+WINDOWS_SYSTEM_PATH = INSTALL_PATH / "win32-system"
 
 
 DOCKER_IMAGE_INFO = "/image-info.json"
@@ -705,35 +705,28 @@ def fix_file_permissions(client: docker.APIClient, container_id: str):
     if sys.platform == "darwin":  # "It just works"
         return
 
-    run_docker_command(
-        client,
-        container_id,
-        [
-            "find",
-            str(PYTHON_INSTALL_PATH),
-            str(SYSTEM_INSTALL_PATH),
-            "-exec",
-            "chmod",
-            "a+r",
-            "{}",
-            ";",
-        ],
-    )
+    for directory, windows in (
+        (PYTHON_INSTALL_PATH, WINDOWS_PYTHON_PATH),
+        (SYSTEM_INSTALL_PATH, WINDOWS_SYSTEM_PATH),
+    ):
+        try:
+            run_docker_command(client, container_id, ["ls", str(directory)])
+        except RuntimeError as exception:
+            continue  # no files for componenet
 
-    if sys.platform == "win32":  # seems to be this even on 64-bit installs
-        # windows can't handle symbolic links so copy, resolving all links
-        # into a windows-specific directory.
+        run_docker_command(
+            client,
+            container_id,
+            ["find", str(directory), "-exec", "chmod", "a+r", "{}", ";"],
+        )
 
-        for source, windows in (
-            (PYTHON_INSTALL_PATH, WINDOWS_PYTHON_PATH),
-            (SYSTEM_INSTALL_PATH, WINDOWS_SYSTEM_PATH),
-        ):
+        if sys.platform == "win32":  # seems to be this even on 64-bit installs
+            # windows can't handle symbolic links so copy, resolving all links
+            # into a windows-specific directory.
             run_docker_command(client, container_id, ["rm", "-rf", str(windows)])
-            print(run_docker_command(
-                client,
-                container_id,
-                ["cp", "-R", "-L", str(source), str(windows)],
-            ))
+            run_docker_command(
+                client, container_id, ["cp", "-R", "-L", str(directory), str(windows)]
+            )
 
 
 def run_docker_command(
