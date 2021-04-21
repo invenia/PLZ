@@ -25,5 +25,5 @@ include:
     - pip install tox
     - docker --version
   script:
-    - tox -e py37
+    - CI_BUILD_TOKEN=$CI_BUILD_TOKEN tox -e py37
     - deactivate
