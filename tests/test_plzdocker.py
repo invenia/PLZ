@@ -924,7 +924,7 @@ def test_fix_file_permissions(tmp_path):
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
             )
         assert re.search(
-            r"^(?:r[w-][x-]){3}$",
+            r"^l(?:r[w-][x-]){3}$",
             run_docker_command(
                 client,
                 container_id,
@@ -948,7 +948,7 @@ def test_fix_file_permissions(tmp_path):
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
             )
         assert re.search(
-            r"^(?:r[w-][x-]){3}$",
+            r"^l(?:r[w-][x-]){3}$",
             run_docker_command(
                 client,
                 container_id,
@@ -977,10 +977,13 @@ def test_fix_file_permissions(tmp_path):
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
             )
-        assert "lrwxr-xr-x\n" == run_docker_command(
-            client,
-            container_id,
-            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        assert re.search(
+            r"^l(?:r[w-][x-]){3}$",
+            run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", "/root/dependencies/system/link"],
+            ),
         )
 
         for directory in ("python", "system", "system/subdirectory"):

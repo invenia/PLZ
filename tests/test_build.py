@@ -502,8 +502,10 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         str(path.absolute()): hash_file(path) for path in files if path.is_file()
     }
     mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
 
     assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert hash_file(zipfile) != contents
     assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
