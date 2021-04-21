@@ -2,6 +2,7 @@
 Tests for plz.build
 """
 import json
+import re
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
@@ -196,9 +197,6 @@ def test_process_requirements(tmp_path):
         with build_info.open("r") as stream:
             info = json.load(stream)
 
-        print(info["system-packages"])
-        print("libwebp" in info["base-packages"])
-
         assert {"pyyaml", "xlrd"} <= set(info["python-packages"].keys())
         assert info["python-packages"]["pyyaml"] == "5.3.1"
         assert info["python-packages"]["xlrd"] == "1.1.0"
@@ -309,6 +307,7 @@ def test_process_requirements(tmp_path):
             no_secrets=True,
             reinstall_python=True,
             pip_args={"plz": ["--no-use-pep517"]},
+            freeze=True,
         )
 
         build_info = build_path / "build-info.json"
@@ -322,6 +321,34 @@ def test_process_requirements(tmp_path):
         assert [filepath] == info["system-packages"]["libwebp"]["files"]
         assert (build_path / "python" / "plz").exists()
         assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+        freeze = build / "frozen-requirements.txt"
+        expected = [
+            "certifi",
+            "chardet",
+            "docker",
+            "idna",
+            "plz",
+            "PyYAML",
+            "requests",
+            "six",
+            "urllib3",
+            "websocket-client",
+        ]
+        with freeze.open("r") as stream:
+            for line in stream.read().splitlines():
+                print(repr(line))
+                if expected[0] == "plz":
+                    assert line == (
+                        "plz @ file:///root/dependencies/pip-downloads/plz-1.1.2.zip"
+                    )
+                else:
+                    match = re.search(r"^([\w_-]+)==\d+\.\d+(?:\.\d+)?$", line)
+                    assert match.group(1) == expected[0]
+
+                expected.pop(0)
+
+        assert expected == []
 
         # invalid image
         with pytest.raises(ValueError):
