@@ -1,4 +1,5 @@
 import json
+import re
 from io import BytesIO
 from pathlib import PurePosixPath
 from shutil import rmtree
@@ -922,10 +923,13 @@ def test_fix_file_permissions(tmp_path):
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
             )
-        assert "lrwxr-xr-x\n" == run_docker_command(
-            client,
-            container_id,
-            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        assert re.search(
+            r"^(?:r[w-][x-]){3}$",
+            run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", "/root/dependencies/system/link"],
+            ),
         )
 
         # mark things readable on linux
@@ -943,10 +947,13 @@ def test_fix_file_permissions(tmp_path):
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
             )
-        assert "lrwxr-xr-x\n" == run_docker_command(
-            client,
-            container_id,
-            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        assert re.search(
+            r"^(?:r[w-][x-]){3}$",
+            run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", "/root/dependencies/system/link"],
+            ),
         )
 
         run_docker_command(
@@ -975,13 +982,13 @@ def test_fix_file_permissions(tmp_path):
             container_id,
             ["stat", "--format=%A", "/root/dependencies/system/link"],
         )
+
         for directory in ("python", "system", "system/subdirectory"):
             assert "drwxr--r--\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/win32-{directory}"],
             )
-
         for file in (
             "python/file",
             "system/file",
@@ -993,11 +1000,6 @@ def test_fix_file_permissions(tmp_path):
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/win32-{file}"],
             )
-        assert "lrwxr-xr-x\n" == run_docker_command(
-            client,
-            container_id,
-            ["stat", "--format=%A", "/root/dependencies/system/link"],
-        )
 
 
 @requires_docker

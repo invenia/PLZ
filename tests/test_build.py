@@ -2,6 +2,7 @@
 Tests for plz.build
 """
 import json
+import os
 import re
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
@@ -82,6 +83,15 @@ def test_zip_package_with_prefix(tmpdir):
 @requires_docker
 def test_process_requirements(tmp_path):
     from plz.build import process_requirements
+
+    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+    if ci_build_token:
+        url = (
+            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+            "/invenia/plz.git"
+        )
+    else:
+        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
 
     build_path = Path(tmp_path / "build")
     requirements = tmp_path / "requirements.txt"
@@ -295,7 +305,7 @@ def test_process_requirements(tmp_path):
 
         # private dependency
         with requirements.open("w") as stream:
-            stream.write("git+ssh://git@gitlab.invenia.ca/invenia/plz.git@1.1.2")
+            stream.write(f"{url}@1.1.2")
 
         process_requirements(
             (requirements,),
@@ -410,7 +420,7 @@ def test_process_requirements(tmp_path):
 
         # non-existent requirement
         with requirements.open("w") as stream:
-            stream.write("git+ssh://git@gitlab.invenia.ca/invenia/plz.git@0.0.0")
+            stream.write(f"{url}@0.0.0")
 
         with pytest.raises(Exception):
             process_requirements(
@@ -513,10 +523,11 @@ def test_build_package_only_files(mock_api_client, tmp_path):
 
     # adding a prefix should force a rezip
     mtime = zipfile.stat().st_mtime
-
+    contents = hash_file(zipfile)
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
+    assert hash_file(zipfile) != contents
     assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
@@ -651,6 +662,15 @@ def test_build_package_only_files(mock_api_client, tmp_path):
 def test_build_package(tmp_path):
     from plz.build import build_package
 
+    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+    if ci_build_token:
+        url = (
+            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+            "/invenia/plz.git"
+        )
+    else:
+        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
+
     with cleanup_image() as image_name:
         build_path = Path(tmp_path / "build")
         files_path = Path(tmp_path / "files")
@@ -672,9 +692,7 @@ def test_build_package(tmp_path):
 
         requirements = tmp_path / "requirements.txt"
         with requirements.open("w") as stream:
-            stream.write(
-                "pyyaml\ngit+ssh://git@gitlab.invenia.ca/invenia/plz.git@1.1.2"
-            )
+            stream.write(f"pyyaml\n{url}@1.1.2")
 
         zipfile = build_package(
             build_path,
@@ -753,7 +771,7 @@ def test_build_package(tmp_path):
 
         # non-existent requirement
         with requirements.open("w") as stream:
-            stream.write("git+ssh://git@gitlab.invenia.ca/invenia/plz.git@0.0.0")
+            stream.write(f"{url}@0.0.0")
 
         with pytest.raises(Exception):
             build_package(
