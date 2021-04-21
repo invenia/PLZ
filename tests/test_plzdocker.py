@@ -855,6 +855,152 @@ def test_system_install(tmp_path):
 
 
 @requires_docker
+def test_fix_file_permissions(tmp_path):
+    from plz.plzdocker import (
+        build_docker_image,
+        fix_file_permissions,
+        run_docker_command,
+        start_docker_container,
+    )
+
+    client = APIClient()
+    with cleanup_image() as image_name:
+        container_name = f"{image_name}-container"
+        build_docker_image(client, image_name)
+        container_id = start_docker_container(
+            client, container_name, tmp_path, image_name, no_secrets=True
+        )
+        run_docker_command(client, container_id, ["mkdir", "/root/dependencies/python"])
+        run_docker_command(
+            client,
+            container_id,
+            ["mkdir", "-p", "/root/dependencies/system/subdirectory"],
+        )
+        run_docker_command(
+            client,
+            container_id,
+            ["touch", "/root/dependencies/python/file"],
+        )
+        run_docker_command(
+            client,
+            container_id,
+            ["touch", "/root/dependencies/system/file"],
+        )
+        run_docker_command(
+            client,
+            container_id,
+            ["touch", "/root/dependencies/system/subdirectory/file"],
+        )
+        run_docker_command(
+            client,
+            container_id,
+            [
+                "ln",
+                "-s",
+                "/root/dependencies/system/subdirectory/file",
+                "/root/dependencies/system/link",
+            ],
+        )
+        run_docker_command(
+            client,
+            container_id,
+            ["find", "/root/dependencies", "-exec", "chmod", "u=rwx,go=", "{}", ";"],
+        )
+
+        # don't make changes on mac
+        fix_file_permissions(client, container_id, platform="darwin")
+        for directory in ("python", "system", "system/subdirectory"):
+            assert "drwx------\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{directory}"],
+            )
+
+        for file in ("python/file", "system/file", "system/subdirectory/file"):
+            assert "-rwx------\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{file}"],
+            )
+        assert "lrwxr-xr-x\n" == run_docker_command(
+            client,
+            container_id,
+            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        )
+
+        # mark things readable on linux
+        fix_file_permissions(client, container_id, platform="linux")
+        for directory in ("python", "system", "system/subdirectory"):
+            assert "drwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{directory}"],
+            )
+
+        for file in ("python/file", "system/file", "system/subdirectory/file"):
+            assert "-rwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{file}"],
+            )
+        assert "lrwxr-xr-x\n" == run_docker_command(
+            client,
+            container_id,
+            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        )
+
+        run_docker_command(
+            client,
+            container_id,
+            ["find", "/root/dependencies", "-exec", "chmod", "u=rwx,go=", "{}", ";"],
+        )
+
+        # copy things to a new directory on windows
+        fix_file_permissions(client, container_id, platform="win32")
+        for directory in ("python", "system", "system/subdirectory"):
+            assert "drwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{directory}"],
+            )
+
+        for file in ("python/file", "system/file", "system/subdirectory/file"):
+            assert "-rwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/{file}"],
+            )
+        assert "lrwxr-xr-x\n" == run_docker_command(
+            client,
+            container_id,
+            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        )
+        for directory in ("python", "system", "system/subdirectory"):
+            assert "drwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/win32-{directory}"],
+            )
+
+        for file in (
+            "python/file",
+            "system/file",
+            "system/link",
+            "system/subdirectory/file",
+        ):
+            assert "-rwxr--r--\n" == run_docker_command(
+                client,
+                container_id,
+                ["stat", "--format=%A", f"/root/dependencies/win32-{file}"],
+            )
+        assert "lrwxr-xr-x\n" == run_docker_command(
+            client,
+            container_id,
+            ["stat", "--format=%A", "/root/dependencies/system/link"],
+        )
+
+
+@requires_docker
 def test_run_docker_command(tmp_path):
     from plz.plzdocker import (
         build_docker_image,

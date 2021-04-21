@@ -684,7 +684,11 @@ def _delete_system_files(client: docker.APIClient, container_id: str, files: Lis
             logging.exception("Failed to delete file %s", filename)
 
 
-def fix_file_permissions(client: docker.APIClient, container_id: str):
+def fix_file_permissions(
+    client: docker.APIClient,
+    container_id: str,
+    platform: Optional[str] = None,
+):
     """
     Make all files in the dependencies directory readable on the host.
     On linux this just requires adding read permissions to files (a
@@ -698,11 +702,16 @@ def fix_file_permissions(client: docker.APIClient, container_id: str):
     Args:
         client (:obj:`docker.APIClient`): Docker APIClient object
         container_id (:obj:`str`): The id of the container to use
+        platform (:obj:`str`): The platform the host is running on.
+            If not supplied, sys.platform will be used.
 
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    if sys.platform == "darwin":  # "It just works"
+    if platform is None:
+        platform = sys.platform
+
+    if platform == "darwin":  # "It just works"
         return
 
     for directory, windows in (
@@ -711,7 +720,7 @@ def fix_file_permissions(client: docker.APIClient, container_id: str):
     ):
         try:
             run_docker_command(client, container_id, ["ls", str(directory)])
-        except RuntimeError as exception:
+        except RuntimeError:
             continue  # no files for componenet
 
         run_docker_command(
@@ -720,7 +729,7 @@ def fix_file_permissions(client: docker.APIClient, container_id: str):
             ["find", str(directory), "-exec", "chmod", "a+r", "{}", ";"],
         )
 
-        if sys.platform == "win32":  # seems to be this even on 64-bit installs
+        if platform == "win32":  # seems to be this even on 64-bit installs
             # windows can't handle symbolic links so copy, resolving all links
             # into a windows-specific directory.
             run_docker_command(client, container_id, ["rm", "-rf", str(windows)])
