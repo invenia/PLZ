@@ -456,7 +456,7 @@ def process_requirements(
                         match = re.search(
                             # bzr+lp, which we'll never see, doesn't use the slashes
                             r"^(\w+)\+\w+:(?://)?"  # vcs + protocol
-                            r"(?:\w+(?::[^@]+)?@)?"  # user + password
+                            r"(?:[\w_-]+(?::[^@]+)?@)?"  # user + password
                             r"(?:[^/#@]+/)+"  # domain/path
                             r"([^/#@.]+)"  # project
                             r"(?:\.\1)?"  # name may include vcs as extension
