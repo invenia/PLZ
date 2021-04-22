@@ -19,6 +19,18 @@ from tests.helpers.util import (
 )
 
 
+# On macOS and Windows, overwriting a file with a file with the same
+# contents updates the mtime. On linux (or at least on the test-runners)
+# this doesn't seem to be the case. This skips all tests that mtimes are
+# different. We are still doing the checks that mtime is the same when
+# the file shouldn't have been touched so this doesn't seem to mask any
+# bugs. A previous attempt was made to just sleep between rerun on linux
+# but even that was not consistent. We would need to force a sleep in
+# after the old zip is deleted to be sure probably and that seems overly
+# invasive.
+SKIP_MTIME_CHECKS = os.environ.get("SKIP_MTIME_CHECKS") == "1"
+
+
 @pytest.fixture()
 def mock_api_client(monkeypatch):
     monkeypatch.setattr(docker, "APIClient", MockAPIClient)
@@ -483,14 +495,18 @@ def test_build_package_only_files(mock_api_client, tmp_path):
 
     # rerunning should not force a rezip
     mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
     assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert hash_file(zipfile) == contents
     assert zipfile.stat().st_mtime == mtime
 
     # rezip should force a rezip
     assert zipfile == build_package(
         build_path, *files, python_version="3.7", rezip=True
     )
-    assert zipfile.stat().st_mtime != mtime
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with ZipFile(zipfile, "r") as z:
         assert set(z.namelist()) == {"file1.py", "file2.py"}
@@ -506,7 +522,8 @@ def test_build_package_only_files(mock_api_client, tmp_path):
 
     assert zipfile == build_package(build_path, *files, python_version="3.7")
     assert hash_file(zipfile) != contents
-    assert zipfile.stat().st_mtime != mtime
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
@@ -530,7 +547,8 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
     assert hash_file(zipfile) != contents
-    assert zipfile.stat().st_mtime != mtime
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
@@ -551,12 +569,15 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     file_hashes = {
         str(path.absolute()): hash_file(path) for path in files if path.is_file()
     }
+    contents = hash_file(zipfile)
     mtime = zipfile.stat().st_mtime
 
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
-    assert zipfile.stat().st_mtime != mtime
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
@@ -579,11 +600,14 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         str(path.absolute()): hash_file(path) for path in files if path.is_file()
     }
     mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
 
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
-    assert zipfile.stat().st_mtime != mtime
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
@@ -597,6 +621,8 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # modifying the zipfile should force a rezip
+    contents = hash_file(zipfile)
+
     with zipfile.open("w") as stream:
         stream.write("fake!")
 
@@ -605,7 +631,9 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
-    assert zipfile.stat().st_mtime != mtime
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
@@ -624,6 +652,7 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="2.7"
     )
+    assert hash_file(zipfile) == contents
     assert zipfile.stat().st_mtime == mtime
 
     with package_info.open("r") as stream:
@@ -646,7 +675,9 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     assert zipfile == build_package(
         build_path, *files, zipped_prefix="lambda", python_version="3.7"
     )
-    assert zipfile.stat().st_mtime != mtime
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
 
     with package_info.open("r") as stream:
         info = json.load(stream)
