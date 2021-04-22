@@ -215,6 +215,9 @@ def build_package(
             or not zipfile.exists()
             or info.get("zip") != _get_file_hash(zipfile)
         ):
+            if zipfile.exists():
+                zipfile.unlink()
+
             all_files: List[Path] = []
 
             for component, hashes in (

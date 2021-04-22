@@ -6,7 +6,6 @@ import os
 import re
 import sys
 from pathlib import Path, PurePosixPath
-from time import sleep
 from zipfile import ZipFile
 
 import docker
@@ -19,14 +18,6 @@ from tests.helpers.util import (
     requires_docker,
     update_json,
 )
-
-
-# Linux does not appear to update the modified time of a file if the
-# change occurs in the same second as the current mtime. When running
-# tests to check whether a zip file is being recreated, we need to make
-# sure there's enough time between reruns for file modification to be
-# visible.
-SLEEP_TIME = 2 if sys.platform == "linux" else 0
 
 
 @pytest.fixture()
@@ -492,13 +483,11 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"file1.py", "file2.py"}
 
     # rerunning should not force a rezip
-    sleep(SLEEP_TIME)
     mtime = zipfile.stat().st_mtime
     assert zipfile == build_package(build_path, *files, python_version="3.7")
     assert zipfile.stat().st_mtime == mtime
 
     # rezip should force a rezip
-    sleep(SLEEP_TIME)
     assert zipfile == build_package(
         build_path, *files, python_version="3.7", rezip=True
     )
@@ -508,7 +497,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"file1.py", "file2.py"}
 
     # updating a file should force a rezip
-    sleep(SLEEP_TIME)
     with files[0].open("w") as stream:
         stream.write("print('hello')")
     file_hashes = {
@@ -537,7 +525,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
                 assert zstream.read() == stream.read()
 
     # adding a prefix should force a rezip
-    sleep(SLEEP_TIME)
     mtime = zipfile.stat().st_mtime
     contents = hash_file(zipfile)
     assert zipfile == build_package(
@@ -558,7 +545,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # adding a file should force a rezip
-    sleep(SLEEP_TIME)
     new_file = files_path / "new.py"
     with new_file.open("w") as stream:
         stream.write("print('hello')")
@@ -589,7 +575,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         }
 
     # removing a file should force a rezip
-    sleep(SLEEP_TIME)
     del files[-1]
     file_hashes = {
         str(path.absolute()): hash_file(path) for path in files if path.is_file()
@@ -613,7 +598,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # modifying the zipfile should force a rezip
-    sleep(SLEEP_TIME)
     with zipfile.open("w") as stream:
         stream.write("fake!")
 
@@ -636,7 +620,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # changing python shouldn't affect file-only zips
-    sleep(SLEEP_TIME)
     mtime = zipfile.stat().st_mtime
 
     assert zipfile == build_package(
@@ -656,7 +639,6 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # invalid package info version should force a rezip
-    sleep(SLEEP_TIME)
     with update_json(package_info) as info:
         info["version"] = "fake"
 
