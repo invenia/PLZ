@@ -4,7 +4,6 @@ Tests for plz.build
 import json
 import os
 import re
-import sys
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
