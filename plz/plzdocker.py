@@ -726,7 +726,7 @@ def fix_file_permissions(
         run_docker_command(
             client,
             container_id,
-            ["find", str(directory), "-exec", "chmod", "a+r", "{}", ";"],
+            ["find", str(directory), "-exec", "chmod", "a+rw", "{}", ";"],
         )
 
         if platform == "win32":  # seems to be this even on 64-bit installs
@@ -734,7 +734,9 @@ def fix_file_permissions(
             # into a windows-specific directory.
             run_docker_command(client, container_id, ["rm", "-rf", str(windows)])
             run_docker_command(
-                client, container_id, ["cp", "-R", "-L", str(directory), str(windows)]
+                client,
+                container_id,
+                ["cp", "-R", "-L", "-p", str(directory), str(windows)],
             )
 
 

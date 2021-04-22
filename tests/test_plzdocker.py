@@ -935,14 +935,14 @@ def test_fix_file_permissions(tmp_path):
         # mark things readable on linux
         fix_file_permissions(client, container_id, platform="linux")
         for directory in ("python", "system", "system/subdirectory"):
-            assert "drwxr--r--\n" == run_docker_command(
+            assert "drwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{directory}"],
             )
 
         for file in ("python/file", "system/file", "system/subdirectory/file"):
-            assert "-rwxr--r--\n" == run_docker_command(
+            assert "-rwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
@@ -965,14 +965,14 @@ def test_fix_file_permissions(tmp_path):
         # copy things to a new directory on windows
         fix_file_permissions(client, container_id, platform="win32")
         for directory in ("python", "system", "system/subdirectory"):
-            assert "drwxr--r--\n" == run_docker_command(
+            assert "drwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{directory}"],
             )
 
         for file in ("python/file", "system/file", "system/subdirectory/file"):
-            assert "-rwxr--r--\n" == run_docker_command(
+            assert "-rwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/{file}"],
@@ -987,7 +987,7 @@ def test_fix_file_permissions(tmp_path):
         )
 
         for directory in ("python", "system", "system/subdirectory"):
-            assert "drwxr--r--\n" == run_docker_command(
+            assert "drwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/win32-{directory}"],
@@ -998,7 +998,7 @@ def test_fix_file_permissions(tmp_path):
             "system/link",
             "system/subdirectory/file",
         ):
-            assert "-rwxr--r--\n" == run_docker_command(
+            assert "-rwxrw-rw-\n" == run_docker_command(
                 client,
                 container_id,
                 ["stat", "--format=%A", f"/root/dependencies/win32-{file}"],
