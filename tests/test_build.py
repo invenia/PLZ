@@ -26,7 +26,7 @@ from tests.helpers.util import (
 # tests to check whether a zip file is being recreated, we need to make
 # sure there's enough time between reruns for file modification to be
 # visible.
-SLEEP_TIME = int(sys.platform == "linux")
+SLEEP_TIME = 2 if sys.platform == "linux" else 0
 
 
 @pytest.fixture()
@@ -357,10 +357,10 @@ def test_process_requirements(tmp_path):
         ]
         with freeze.open("r") as stream:
             for line in stream.read().splitlines():
-                print(repr(line))
                 if expected[0] == "plz":
-                    assert line == (
-                        "plz @ file:///root/dependencies/pip-downloads/plz-1.1.2.zip"
+                    assert line in (
+                        "plz @ file:///root/dependencies/pip-downloads/plz-1.1.2.zip",
+                        "plz===plz-VERSION",  # Windows...
                     )
                 else:
                     match = re.search(r"^([\w_-]+)==\d+\.\d+(?:\.\d+)?$", line)
