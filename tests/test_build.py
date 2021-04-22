@@ -5,6 +5,7 @@ import json
 import os
 import re
 from pathlib import Path, PurePosixPath
+from time import sleep
 from zipfile import ZipFile
 
 import docker
@@ -487,6 +488,7 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     assert zipfile.stat().st_mtime == mtime
 
     # rezip should force a rezip
+    sleep(1)  # confirming this isn't linux being weird about mtime
     assert zipfile == build_package(
         build_path, *files, python_version="3.7", rezip=True
     )
