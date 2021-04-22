@@ -549,15 +549,14 @@ def process_requirements(
 
         if freeze:
             pip_freeze(client, container_id, build / "frozen-requirements.txt")
-
-        fix_file_permissions(client, container_id)
-
     except Exception:
         logging.exception("Error occurred while installing dependencies")
         raise
     finally:
         with build_info.open("w") as stream:
             json.dump(info, stream, sort_keys=True, indent=4)
+
+        fix_file_permissions(client, container_id)
         stop_docker_container(client, container_id)
 
 
