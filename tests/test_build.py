@@ -60,9 +60,9 @@ def test_zip_package_no_prefix(tmpdir):
 
     with ZipFile(zip_path, "r") as z:
         assert set(z.namelist()) == {
-            "test1.py",
-            "pg8000/test-x.py",
-            "testdir/testfile.py",
+            "package/test1.py",
+            "package/pg8000/test-x.py",
+            "package/testdir/testfile.py",
         }
 
 
@@ -80,7 +80,9 @@ def test_zip_package_with_prefix(tmpdir):
     with (package_path / "testdir" / "testfile.py").open("w") as f:
         f.write("#test 2")
 
-    zip_package(zip_path, package_path, Path(__file__), zipped_prefix=prefix)
+    zip_package(
+        zip_path, *package_path.iterdir(), Path(__file__), zipped_prefix=prefix
+    )
 
     assert zip_path.exists()
 

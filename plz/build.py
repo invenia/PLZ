@@ -231,7 +231,7 @@ def build_package(
                     directory = build / component
 
                 if hashes and directory.exists():
-                    all_files.append(directory)
+                    all_files.extend(directory.iterdir())
                     info[component] = hashes
 
             all_files.extend(files)
@@ -588,14 +588,11 @@ def zip_package(
         ignore_filetypes = IGNORE_FILETYPES
 
     # Delete unnecessary dirs
-    with ZipFile(zipfile_path, "w") as z:
+    with ZipFile(zip_file_path, "w") as z:
         remaining = []
         for file in files:
             file = file.absolute()
-            if file.is_file():
-                remaining.append((file, file.parent))
-            else:
-                remaining.append((file, file))
+            remaining.append((file, file.parent))
 
         while remaining:
             path, relative_to = remaining.pop(0)
