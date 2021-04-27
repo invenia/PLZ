@@ -303,16 +303,23 @@ def _get_file_hashes(*paths: Path) -> Dict[str, str]:
         path = remaining.pop()
 
         if path.is_file():
-            hashes[str(path)] = _get_file_hash(path)
+            hash_value = _get_file_hash(path)
+            if hash_value:
+                hashes[str(path)] = hash_value
         elif path.is_dir():
             remaining.extend(path.iterdir())
 
     return hashes
 
 
-def _get_file_hash(path: Path) -> str:
+def _get_file_hash(path: Path) -> Optional[str]:
     with path.open("rb") as stream:
-        return sha256(stream.read()).hexdigest()
+        contents = stream.read()
+
+        if not contents:
+            return None
+
+        return sha256(contents).hexdigest()
 
 
 def process_requirements(
