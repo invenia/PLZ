@@ -473,11 +473,6 @@ def process_requirements(
                 download_directory.mkdir()
                 docker_download_directory = INSTALL_PATH / download_directory.name
 
-                cache_directory = build / "pip-cache"
-                if cache_directory.exists():
-                    rmtree(cache_directory)
-                cache_directory.mkdir()
-
             if pip_args is None:
                 pip_args = {}
 
@@ -548,7 +543,19 @@ def process_requirements(
                             requirement_line, pip_args.get(name, pip_args.get(key, []))
                         )
 
-                        if no_secrets:
+                        try:
+                            info["python-packages"][name] = pip_install(
+                                client,
+                                container_id,
+                                requirement_line,
+                                install_args,
+                                name=name,
+                            )
+                        except Exception:
+                            if not no_secrets:
+                                raise
+
+                            # try again downloading first
                             cmd = [
                                 "pip",
                                 "download",
@@ -591,13 +598,13 @@ def process_requirements(
                             else:
                                 raise ValueError(f"downloading {name} failed")
 
-                        info["python-packages"][name] = pip_install(
-                            client,
-                            container_id,
-                            requirement_line,
-                            install_args,
-                            name=name,
-                        )
+                            info["python-packages"][name] = pip_install(
+                                client,
+                                container_id,
+                                requirement_line,
+                                install_args,
+                                name=name,
+                            )
 
         if freeze:
             if isinstance(freeze, bool):
