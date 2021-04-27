@@ -80,9 +80,7 @@ def test_zip_package_with_prefix(tmpdir):
     with (package_path / "testdir" / "testfile.py").open("w") as f:
         f.write("#test 2")
 
-    zip_package(
-        zip_path, *package_path.iterdir(), Path(__file__), zipped_prefix=prefix
-    )
+    zip_package(zip_path, *package_path.iterdir(), Path(__file__), zipped_prefix=prefix)
 
     assert zip_path.exists()
 
@@ -192,9 +190,15 @@ def test_process_requirements(tmp_path):
         assert not (build_path / "python").exists()
         assert not (build_path / "system").exists()
 
+        # this constraint file should be ignored
+        constraints = build / "constraints"
+        constraints.mkdir(exist_ok=True)
+        with (constraints / "file.txt").open("w") as stream:
+            stream.write("pyyaml==5.3.0")
+
         # new dependencies
         with requirements.open("w") as stream:
-            stream.write("pyyaml==5.3.1\nxlrd!=1.2.0,<2.0,>=1.0.1")
+            stream.write("pyyaml<5.3.2\nxlrd!=1.2.0,<2.0,>=1.0.1")
         with system_requirements.open("w") as stream:
             stream.write(
                 "version: 0.1.0\n"
@@ -317,9 +321,13 @@ def test_process_requirements(tmp_path):
         assert (build_path / "python" / "xlrd").exists()
         assert (build_path / "system" / PurePosixPath(filepath).name).exists()
 
-        # private dependency
+        # private dependency ( and constraint file)
         with requirements.open("w") as stream:
-            stream.write(f"{url}@1.1.2")
+            stream.write(f"xlrd\n{url}@1.1.2")
+
+        constraint = tmp_path / "constraint.txt"
+        with constraint.open("w") as stream:
+            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1")
 
         process_requirements(
             (requirements,),
@@ -332,6 +340,7 @@ def test_process_requirements(tmp_path):
             reinstall_python=True,
             pip_args={"plz": ["--no-use-pep517"]},
             freeze=True,
+            constraints=[constraint],
         )
 
         build_info = build_path / "build-info.json"
@@ -358,14 +367,14 @@ def test_process_requirements(tmp_path):
             "six",
             "urllib3",
             "websocket-client",
+            "xlrd",
         ]
         with freeze.open("r") as stream:
             for line in stream.read().splitlines():
                 if expected[0] == "plz":
-                    assert line in (
-                        "plz @ file:///root/dependencies/pip-downloads/plz-1.1.2.zip",
-                        "plz===plz-VERSION",  # Windows...
-                    )
+                    assert line == "plz==1.1.2"
+                elif expected[0] == "xlrd":
+                    assert line == "xlrd==1.1.0"
                 else:
                     match = re.search(r"^([\w_-]+)==\d+\.\d+(?:\.\d+)?$", line)
                     assert match.group(1) == expected[0]
@@ -827,6 +836,40 @@ def test_build_package(tmp_path):
         assert info["prefix"] is None
         assert info["zip"] is None
         assert not zipfile.exists()
+
+        # freeze and constraints
+        with requirements.open("w") as stream:
+            stream.write("xlrd")
+
+        constraint = tmp_path / "constraints.txt"
+        with constraint.open("w") as stream:
+            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1\nrequests==1.1.1")
+
+        freeze = tmp_path / "frozen.txt"
+
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            python_version="3.7",
+            no_secrets=True,
+            force=True,
+            constraints=constraint,
+            freeze=freeze,
+            rebuild_image=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert info.get("system-packages", {}) == {}
+        assert info.get("python-packages", {}) == {"xlrd": "1.1.0"}
+
+        assert freeze.exists()
+        with freeze.open("r") as stream:
+            assert stream.read() == "xlrd==1.1.0\n"
 
         # real-world test. what datafeeds needs
         with requirements.open("w") as stream:

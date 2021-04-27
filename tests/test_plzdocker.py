@@ -604,6 +604,27 @@ def test_pip_install(tmp_path):
         assert (python_directory / "requests").exists()
         assert (python_directory / "openpyxl").exists()
 
+    with cleanup_image() as image_name:
+        container_name = f"{image_name}-container"
+        client = APIClient()
+        build_docker_image(client, image_name)
+        container_id = start_docker_container(
+            client, container_name, tmp_path, image_name, no_secrets=True
+        )
+
+        rmtree(python_directory)
+
+        constraints = tmp_path / "constraints"
+        constraints.mkdir()
+        with (constraints / "file.txt").open("w") as stream:
+            stream.write(f"xlrd!=1.2.0,<2.0,>=1.0.1\nrequests=={requests_version}")
+
+        assert "1.1.0" == pip_install(client, container_id, "xlrd")
+
+        assert python_directory.is_dir()
+        assert (python_directory / "xlrd-1.1.0.dist-info").exists()
+        assert not (python_directory / "requests").exists()
+
 
 @requires_docker
 def test_system_install(tmp_path):

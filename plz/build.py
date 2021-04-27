@@ -7,7 +7,7 @@ import re
 import sys
 from hashlib import sha256
 from pathlib import Path
-from shutil import rmtree
+from shutil import copy2, rmtree
 from subprocess import check_output
 from typing import Dict, List, Optional, Sequence, Set, Union
 from uuid import uuid4
@@ -71,7 +71,6 @@ def build_package(
     python_version: str = DEFAULT_PYTHON,
     reinstall_python: bool = False,
     reinstall_system: bool = False,
-    freeze_dependencies: bool = False,
     zipped_prefix: Optional[Path] = None,
     pip_args: Optional[Dict[str, List[str]]] = None,
     image_name: Optional[str] = None,
@@ -80,9 +79,11 @@ def build_package(
     rezip: bool = False,
     no_secrets: bool = False,
     force: bool = False,
-    freeze: bool = False,
+    freeze: Union[bool, Path] = False,
     ignore: Set[str] = IGNORE,
     ignore_filetypes: Set[str] = IGNORE_FILETYPES,
+    zip_file: Optional[Path] = None,
+    constraints: Optional[Union[Path, List[Path]]] = None,
 ) -> Path:
     """
     Build a python package.
@@ -112,9 +113,13 @@ def build_package(
             If any or your packages depend on private dependencies, you will need
             to manually specify them in the order they need to be deleted.
         force (:obj:`bool`): Force a complete rebuild
-        freeze (:obj:`bool`): Create a pip freeze file.
+        freeze (:obj:`Union[bool, Path]`): Create a pip freeze file. If a path
+            is passed, it will be saved to that location.
         ignore (:obj:`Set[str]`): Files to ignore when packaging the zip.
         ignore_filetypes (:obj:`Set[str]`): Filetypes to ignore when packaging the zip.
+        zip_file (:obj:`Optional[Path]`): Where to save the zip file
+        constraints (:obj:`Optional[List[Path]]`): Any constraints files
+            to include when installing.
 
     TODO: any additional work required to make the resulting container directly
     usable by a lambda.
@@ -146,9 +151,16 @@ def build_package(
     elif reinstall_system:
         rebuild_image = True
 
+    if zip_file is None:
+        zip_file = build / "package.zip"
+
+    if constraints is None:
+        constraints = []
+    elif isinstance(constraints, Path):
+        constraints = [constraints]
+
     build.mkdir(parents=True, exist_ok=True)
 
-    zipfile = build / "package.zip"
     package_info = build / PACKAGE_INFO_FILENAME
 
     # Make sure requirements is a list
@@ -182,15 +194,19 @@ def build_package(
     system_hashes = {}
     if system_requirements:
         system_hashes = _get_file_hashes(system_requirements)
+    constraint_hashes = _get_file_hashes(*constraints)
 
     try:
         if (
             rebuild_image
             or reinstall_python
             or reinstall_system
+            or info.get("constraint", {}) != constraint_hashes
             or info.get("python", {}) != python_hashes
             or info.get("system", {}) != system_hashes
         ):
+            info["constraints"] = constraint_hashes
+
             process_requirements(
                 requirements,
                 system_requirements,
@@ -204,19 +220,21 @@ def build_package(
                 reinstall_python=reinstall_python,
                 reinstall_system=reinstall_system,
                 freeze=freeze,
+                constraints=constraints,
             )
             rezip = True
 
         file_hashes = _get_file_hashes(*files)
+        prefix_string = str(zipped_prefix) if zipped_prefix else None
         if (
             rezip
-            or info.get("prefix") != zipped_prefix
+            or info.get("prefix") != prefix_string
             or info.get("files", {}) != file_hashes
-            or not zipfile.exists()
-            or info.get("zip") != _get_file_hash(zipfile)
+            or not zip_file.exists()
+            or info.get("zip") != _get_file_hash(zip_file)
         ):
-            if zipfile.exists():
-                zipfile.unlink()
+            if zip_file.exists():
+                zip_file.unlink()
 
             all_files: List[Path] = []
 
@@ -238,14 +256,14 @@ def build_package(
             info["files"] = file_hashes
 
             zip_package(
-                zipfile,
+                zip_file,
                 *all_files,
                 zipped_prefix=zipped_prefix,
                 ignore=ignore,
                 ignore_filetypes=ignore_filetypes,
             )
             info["prefix"] = zipped_prefix
-            info["zip"] = _get_file_hash(zipfile)
+            info["zip"] = _get_file_hash(zip_file)
     except Exception:
         logging.exception("Error while building zip file")
 
@@ -255,19 +273,20 @@ def build_package(
         # as bad if an error occurred that effects the container.
         info["system"] = {}
         info["python"] = {}
+        info["constraints"] = {}
         info["files"] = {}
         info["prefix"] = None
         info["zip"] = None
 
-        if zipfile.exists():
-            zipfile.unlink()
+        if zip_file.exists():
+            zip_file.unlink()
 
         raise
     finally:
         with package_info.open("w") as stream:
             json.dump(info, stream, sort_keys=True, indent=4)
 
-    return zipfile
+    return zip_file
 
 
 def _get_file_hashes(*paths: Path) -> Dict[str, str]:
@@ -309,7 +328,8 @@ def process_requirements(
     rebuild_image: bool = False,
     reinstall_python: bool = False,
     reinstall_system: bool = False,
-    freeze: bool = False,
+    freeze: Union[bool, Path] = False,
+    constraints: Optional[List[Path]] = None,
 ):
     """
     Using pip, install python requirements into a docker instance
@@ -334,13 +354,27 @@ def process_requirements(
         rebuild_image (:obj:`bool`): Delete any existing images with the same name
         reinstall_python (:obj:`bool`): Reinstall python requirements.
         reinstall_system (:obj:`bool`): Reinstall system requirements.
-        freeze (:obj:`bool`): Create a pip freeze file.
+        freeze (:obj:`Union[bool, Path]`): Create a pip freeze file. If a path
+            is passed, it will be saved to that location.
+        constraints (:obj:`Optional[List[Path]]`): Any constraints files
+            to include when installing.xw
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
     """
+    if constraints is None:
+        constraints = []
+
     build.mkdir(parents=True, exist_ok=True)
     build_info = build / BUILD_INFO_FILENAME
+
+    constraints_directory = build / "constraints"
+    if constraints_directory.exists():
+        rmtree(constraints_directory)
+    constraints_directory.mkdir()
+
+    for index, constraint in enumerate(constraints):
+        copy2(constraint, constraints_directory / f"constraint-{index}.txt")
 
     try:
         client = docker.APIClient()
@@ -429,8 +463,13 @@ def process_requirements(
                 download_directory = build / "pip-downloads"
                 if download_directory.exists():
                     rmtree(download_directory)
-                download_directory.mkdir(exist_ok=True)
+                download_directory.mkdir()
                 docker_download_directory = INSTALL_PATH / download_directory.name
+
+                cache_directory = build / "pip-cache"
+                if cache_directory.exists():
+                    rmtree(cache_directory)
+                cache_directory.mkdir()
 
             if pip_args is None:
                 pip_args = {}
@@ -510,6 +549,9 @@ def process_requirements(
                                 str(download_directory),
                             ]
 
+                            for constraint in constraints:
+                                cmd.extend(("--constraint", str(constraint)))
+
                             for index, argument in enumerate(install_args):
                                 if argument in CROSS_ARGUMENTS:
                                     end_index = index + CROSS_ARGUMENTS[argument] + 1
@@ -551,7 +593,10 @@ def process_requirements(
                         )
 
         if freeze:
-            pip_freeze(client, container_id, build / "frozen-requirements.txt")
+            if isinstance(freeze, bool):
+                freeze = build / "frozen-requirements.txt"
+
+            pip_freeze(client, container_id, freeze, info["python-packages"])
     except Exception:
         logging.exception("Error occurred while installing dependencies")
         raise
@@ -564,7 +609,7 @@ def process_requirements(
 
 
 def zip_package(
-    zipfile_path: Path,
+    zip_file_path: Path,
     *files: Path,
     zipped_prefix: Optional[Path] = None,
     ignore: Optional[Set[str]] = None,
@@ -574,7 +619,7 @@ def zip_package(
     Zip up files/dirs and python packages
 
     Args:
-        zipfile_path (:obj:`pathlib.Path`): The path to the zipfile you want to make
+        zip_file_path (:obj:`pathlib.Path`): The path to the zip_file you want to make
         files (:obj:`pathlib.Path`): The files to be zipped
         zipped_prefix (:obj:`Optional[pathlib.Path]`): A path to prefix non dirs in the
             resulting zip file

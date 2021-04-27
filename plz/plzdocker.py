@@ -16,6 +16,7 @@ SUPPORTED_PYTHON = {"3.6", "3.7", "3.8"}
 
 HOME_PATH = PurePosixPath("/root")
 INSTALL_PATH = HOME_PATH / "dependencies"
+CONSTRAINTS_PATH = INSTALL_PATH / "constraints"
 PYTHON_INSTALL_PATH = INSTALL_PATH / "python"
 SYSTEM_INSTALL_PATH = INSTALL_PATH / "system"
 ENVIRONMENT = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
@@ -385,9 +386,23 @@ def pip_install(
         # If we're calling pip_install, it's because our current version
         # doesn't meet our requirements.
         "--upgrade",
-        *pip_args,
-        requirement,
     ]
+
+    try:
+        run_docker_command(client, container_id, ["ls", str(CONSTRAINTS_PATH)])
+    except RuntimeError:
+        # no contraints files exist
+        pass
+    else:
+        for path in run_docker_command(
+            client,
+            container_id,
+            ["find", str(CONSTRAINTS_PATH), "-type", "f", "-name", "*.txt"],
+        ).splitlines():
+            cmd.extend(("--constraint", path))
+
+    cmd.extend(pip_args)
+    cmd.append(requirement)
 
     logging.info("Pip Install %s: %s", requirement, cmd)
     run_docker_command(client, container_id, cmd, environment=ENVIRONMENT)
@@ -429,7 +444,12 @@ def pip_install(
     return version
 
 
-def pip_freeze(client: docker.APIClient, container_id: str, path: Path):
+def pip_freeze(
+    client: docker.APIClient,
+    container_id: str,
+    path: Path,
+    versions: Dict[str, str],
+):
     """
     Create a freeze file.
 
@@ -447,7 +467,29 @@ def pip_freeze(client: docker.APIClient, container_id: str, path: Path):
         environment=ENVIRONMENT,
     )
     with path.open("w") as stream:
-        stream.write(requirements)
+        # we don't want to write the freeze file as-is because it will
+        # be wrong for any packages that were separately downloaded with
+        # pip download.
+        for requirement in requirements.split("\n"):
+            # how mac/linux displays downloaded files
+            match = re.search(r"^([\w_-]+) @ ", requirement)
+
+            if match:
+                package = match.group(1)
+
+                if match.group(1) in versions:
+                    requirement = f"{package}=={versions[package]}"
+
+            # how windows displays downloaded files
+            elif "===" in requirement:
+                package = requirement.split("===", 1)[0]
+
+                if package in versions:
+                    requirement = f"{package}=={versions[package]}"
+
+            if requirement:
+                stream.write(requirement)
+                stream.write("\n")
 
 
 def yum_install(
