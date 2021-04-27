@@ -110,7 +110,7 @@ def build_package(
         rezip (:obj:`bool`): Recreate the zip file even if nothing has changed.
         no_secrets (:obj:`bool`): Download all python packages locally instead of
             binding your .ssh directory and .pip file to the docker container.
-            If any or your packages depend on private dependencies, you will need
+            If any of your packages depend on private dependencies, you will need
             to manually specify them in the order they need to be deleted.
         force (:obj:`bool`): Force a complete rebuild
         freeze (:obj:`Union[bool, Path]`): Create a pip freeze file. If a path
@@ -364,7 +364,7 @@ def process_requirements(
         freeze (:obj:`Union[bool, Path]`): Create a pip freeze file. If a path
             is passed, it will be saved to that location.
         constraints (:obj:`Optional[List[Path]]`): Any constraints files
-            to include when installing.xw
+            to include when installing.
 
     Raises:
         FileNotFoundError: If no files are copied after pip installation
@@ -642,9 +642,13 @@ def zip_package(
     """
     if ignore is None:
         ignore = IGNORE
+    else:
+        ignore = ignore | IGNORE
 
     if ignore_filetypes is None:
         ignore_filetypes = IGNORE_FILETYPES
+    else:
+        ignore_filetypes = ignore_filetypes | IGNORE_FILETYPES
 
     # Delete unnecessary dirs
     with ZipFile(zip_file_path, "w") as z:
