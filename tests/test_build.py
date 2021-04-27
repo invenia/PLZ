@@ -882,9 +882,8 @@ def test_build_package(tmp_path):
                 "filetypes:\n"
                 "  - .so\n"
                 "packages:\n"
-                "  libgomp: []\n"
-                "  grib_api-devel: []\n"
-                "  eccodes-data: /usr/share/eccodes"
+                "  - libgomp\n"
+                "  - grib_api-devel"
             )
 
         zipfile = build_package(
