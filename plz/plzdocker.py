@@ -659,7 +659,7 @@ def copy_system_packages(
 
         copied_files = []
 
-        file_list = desired_files.pop(name, [])
+        file_list = desired_files.pop(name, []) or []
 
         # This seems like an easy enough 'mistake' to make that we should just
         # support it because the error if we don't support it is trying to copy
