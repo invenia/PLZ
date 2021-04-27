@@ -19,6 +19,7 @@ INSTALL_PATH = HOME_PATH / "dependencies"
 CONSTRAINTS_PATH = INSTALL_PATH / "constraints"
 PYTHON_INSTALL_PATH = INSTALL_PATH / "python"
 SYSTEM_INSTALL_PATH = INSTALL_PATH / "system"
+CACHE_PATH = INSTALL_PATH / "pip-cache"
 ENVIRONMENT = [f"PYTHONPATH={PYTHON_INSTALL_PATH}"]
 WINDOWS_PYTHON_PATH = INSTALL_PATH / "win32-python"
 WINDOWS_SYSTEM_PATH = INSTALL_PATH / "win32-system"
@@ -257,6 +258,8 @@ def start_docker_container(
         yum_install(client, container_id, "yum-utils")
         packages = list_system_packages(client, container_id)
 
+        run_docker_command(client, container_id, ["mkdir", "-p", str(CACHE_PATH)])
+
         with build_info.open("w") as stream:
             json.dump(
                 {
@@ -381,6 +384,8 @@ def pip_install(
     cmd = [
         "pip",
         "install",
+        "--cache-dir",
+        str(CACHE_PATH),
         "--target",
         str(PYTHON_INSTALL_PATH),
         # If we're calling pip_install, it's because our current version
