@@ -562,7 +562,12 @@ def test_delete_docker_container():
 
 @requires_docker
 def test_pip_install(tmp_path):
-    from plz.plzdocker import build_docker_image, pip_install, start_docker_container
+    from plz.plzdocker import (
+        build_docker_image,
+        fix_file_permissions,
+        pip_install,
+        start_docker_container,
+    )
 
     # NOTE: we'll be testing private repos and downloaded packages in build
     # TODO: test pip_args
@@ -612,6 +617,7 @@ def test_pip_install(tmp_path):
             client, container_name, tmp_path, image_name, no_secrets=True
         )
 
+        fix_file_permissions(client, container_id)
         rmtree(python_directory)
 
         constraints = tmp_path / "constraints"
@@ -636,6 +642,7 @@ def test_system_install(tmp_path):
     from plz.plzdocker import (
         build_docker_image,
         copy_system_packages,
+        fix_file_permissions,
         list_system_packages,
         run_docker_command,
         start_docker_container,
@@ -713,6 +720,7 @@ def test_system_install(tmp_path):
         }
 
         # running again should copy nothing
+        fix_file_permissions(client, container_id)
         rmtree(system_directory)
         system_directory.mkdir()
         assert [] == copy_system_packages(
@@ -727,6 +735,7 @@ def test_system_install(tmp_path):
         assert {path.name for path in system_directory.iterdir()} == set()
 
         # copy nothing if you didn't ask for anything
+        fix_file_permissions(client, container_id)
         rmtree(system_directory)
         system_directory.mkdir()
         installed = {}
@@ -827,6 +836,7 @@ def test_system_install(tmp_path):
         assert {path.name for path in system_directory.iterdir()} == set()
 
         # real-world test. what datafeeds needs
+        fix_file_permissions(client, container_id)
         rmtree(system_directory)
         system_directory.mkdir()
         container_id = start_docker_container(
