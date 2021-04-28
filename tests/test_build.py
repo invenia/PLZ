@@ -701,6 +701,19 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     with ZipFile(zipfile, "r") as z:
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
+    # different file hierarch should for a rezip
+    (files_path / "new.py").unlink()  # need to make directory the same
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, files_path, zipped_prefix="lambda", python_version="3.7"
+    )
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/files/file1.py", "lambda/files/file2.py"}
+
 
 @requires_docker
 def test_build_package(tmp_path):

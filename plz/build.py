@@ -226,10 +226,12 @@ def build_package(
 
         file_hashes = _get_file_hashes(*files)
         prefix_string = str(zipped_prefix) if zipped_prefix else None
+        file_list = [str(path.absolute()) for path in files]
         if (
             rezip
             or info.get("prefix") != prefix_string
             or info.get("files", {}) != file_hashes
+            or info.get("root-files", []) != file_list
             or not zip_file.exists()
             or info.get("zip") != _get_file_hash(zip_file)
         ):
@@ -264,6 +266,7 @@ def build_package(
             )
             info["prefix"] = zipped_prefix
             info["zip"] = _get_file_hash(zip_file)
+            info["root-files"] = file_list
     except Exception:
         logging.exception("Error while building zip file")
 
@@ -275,6 +278,7 @@ def build_package(
         info["python"] = {}
         info["constraints"] = {}
         info["files"] = {}
+        info["root-files"] = {}
         info["prefix"] = None
         info["zip"] = None
 
