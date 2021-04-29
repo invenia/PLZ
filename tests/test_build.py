@@ -3,85 +3,32 @@ Tests for plz.build
 """
 import json
 import os
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
 import docker
 import pytest
-from docker.errors import APIError
 
-from plz.build import (
-    build_package,
-    copy_included_files,
-    process_requirements,
-    zip_package,
+from tests.helpers.util import (
+    MockAPIClient,
+    cleanup_image,
+    hash_file,
+    requires_docker,
+    update_json,
 )
-from tests.helpers.util import MockAPIClient, MockAPIClientError
 
 
-TEST_INFO = {
-    "files": {"file1.py": 1},
-    "requirements": {"requirements.txt": 1},
-    "zipped_prefix": "prefix",
-}
-
-
-def test_copy_included_files_fresh_package_path(tmpdir):
-    build_path = Path(tmpdir / "build")
-    build_info = build_path / "build-info.json"
-    package_path = build_path / "package"
-    files_path = Path(tmpdir / "files")
-
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
-
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
-
-    copy_included_files(build_path, build_info, TEST_INFO, package_path, *files)
-
-    assert build_path.exists()
-    assert build_info.exists()
-    assert package_path.exists()
-    assert files_path.exists()
-
-    assert (package_path / "file1.py").exists()
-    assert (package_path / "file2.py").exists()
-    assert (package_path / "testpath").exists()
-
-
-def test_copy_included_files_existing_package_path(tmpdir):
-    build_path = Path(tmpdir / "build")
-    build_info = build_path / "build-info.json"
-    package_path = build_path / "package"
-    files_path = Path(tmpdir / "files")
-
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
-
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
-
-    build_path.mkdir()
-    package_path.mkdir()
-    copy_included_files(build_path, build_info, TEST_INFO, package_path, *files)
-
-    assert build_path.exists()
-    assert build_info.exists()
-    assert package_path.exists()
-    assert files_path.exists()
-
-    assert (package_path / "file1.py").exists()
-    assert (package_path / "file2.py").exists()
-    assert (package_path / "testpath").exists()
+# On macOS and Windows, overwriting a file with a file with the same
+# contents updates the mtime. On linux (or at least on the test-runners)
+# this doesn't seem to be the case. This skips all tests that mtimes are
+# different. We are still doing the checks that mtime is the same when
+# the file shouldn't have been touched so this doesn't seem to mask any
+# bugs. A previous attempt was made to just sleep between rerun on linux
+# but even that was not consistent. We would need to force a sleep in
+# after the old zip is deleted to be sure probably and that seems overly
+# invasive.
+SKIP_MTIME_CHECKS = os.environ.get("SKIP_MTIME_CHECKS") == "1"
 
 
 @pytest.fixture()
@@ -89,65 +36,9 @@ def mock_api_client(monkeypatch):
     monkeypatch.setattr(docker, "APIClient", MockAPIClient)
 
 
-@pytest.fixture()
-def mock_api_client_error(monkeypatch):
-    monkeypatch.setattr(docker, "APIClient", MockAPIClientError)
-
-
-def test_process_requirements(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    package_path = build_path / "package"
-    requirements = tmpdir / "requirements.txt"
-    yum_requirements = tmpdir / "yum.yaml"
-
-    env = build_path / "package-env"
-
-    build_path.mkdir()
-    package_path.mkdir()
-    with requirements.open("w") as f:
-        f.write("pg8000")
-    with yum_requirements.open("w") as f:
-        f.write("libpng:\n  - /usr/lib64/libpng15.so.15")
-
-    # Create some env files
-    env.mkdir()
-    (env / "pg8000").mkdir()
-    (env / "pg8000" / "__pycache__").mkdir()
-    (env / "pg8000.dist-info").mkdir()
-    with (env / "file.py").open("w") as f:
-        f.write("# test")
-
-    process_requirements(
-        (requirements,), (yum_requirements,), package_path, env, python_version="3.8"
-    )
-
-    assert build_path.exists()
-    assert package_path.exists()
-    assert (package_path / "file.py").exists()
-    assert (package_path / "pg8000").exists()
-
-
-def test_process_requirements_no_files_failure(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    package_path = build_path / "package"
-    requirements = tmpdir / "requirements.txt"
-    env = build_path / "package-env"
-
-    build_path.mkdir()
-    package_path.mkdir()
-    with requirements.open("w") as f:
-        f.write("pg8000")
-
-    with pytest.raises(FileNotFoundError):
-        process_requirements((requirements,), [], package_path, env)
-
-    assert build_path.exists()
-    assert package_path.exists()
-    assert not (package_path / "file.py").exists()
-    assert not (package_path / "pg8000").exists()
-
-
 def test_zip_package_no_prefix(tmpdir):
+    from plz.build import zip_package
+
     package_path = Path(tmpdir / "package")
     zip_path = tmpdir / "package.zip"
 
@@ -169,13 +60,15 @@ def test_zip_package_no_prefix(tmpdir):
 
     with ZipFile(zip_path, "r") as z:
         assert set(z.namelist()) == {
-            "test1.py",
-            "pg8000/test-x.py",
-            "testdir/testfile.py",
+            "package/test1.py",
+            "package/pg8000/test-x.py",
+            "package/testdir/testfile.py",
         }
 
 
 def test_zip_package_with_prefix(tmpdir):
+    from plz.build import zip_package
+
     package_path = Path(tmpdir / "package")
     zip_path = tmpdir / "package.zip"
     prefix = Path("prefix")
@@ -187,156 +80,852 @@ def test_zip_package_with_prefix(tmpdir):
     with (package_path / "testdir" / "testfile.py").open("w") as f:
         f.write("#test 2")
 
-    zip_package(zip_path, package_path, zipped_prefix=prefix)
+    zip_package(zip_path, *package_path.iterdir(), Path(__file__), zipped_prefix=prefix)
 
     assert zip_path.exists()
 
     with ZipFile(zip_path, "r") as z:
-        assert set(z.namelist()) == {"prefix/test1.py", "prefix/testdir/testfile.py"}
+        assert set(z.namelist()) == {
+            "prefix/test1.py",
+            "prefix/testdir/testfile.py",
+            "prefix/test_build.py",
+        }
 
 
-def test_build_package_only_files_build_info_exists(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
-    build_info = build_path / "build-info.json"
+@requires_docker
+def test_process_requirements(tmp_path):
+    from plz.build import process_requirements
 
-    build_path.mkdir()
-    with build_info.open("w") as stream:
-        json.dump(TEST_INFO, stream)
+    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+    if ci_build_token:
+        url = (
+            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+            "/invenia/plz.git"
+        )
+    else:
+        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
+
+    build_path = Path(tmp_path / "build")
+    requirements = tmp_path / "requirements.txt"
+    system_requirements = tmp_path / "yum.yaml"
+
+    with requirements.open("w") as stream:
+        stream.write("pyyaml==5.3.1")
+    with system_requirements.open("w") as stream:
+        stream.write("version: 0.1.0\nfiletypes:\n  - .so\npackages:\n  - libpng")
+
+    build = tmp_path / "build"
+
+    with cleanup_image() as image_name:
+        container_name = f"{image_name}-container"
+
+        process_requirements(
+            (requirements,),
+            system_requirements,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+        )
+
+        # Image and container should still exist. the container should be stopped
+        client = docker.APIClient()
+        assert 1 == len(client.images(name=image_name, quiet=True))
+        assert 0 == len(
+            client.containers(
+                filters={"ancestor": image_name, "name": container_name}, quiet=True
+            )
+        )
+        assert 1 == len(
+            client.containers(
+                filters={"ancestor": image_name, "name": container_name},
+                all=True,
+                quiet=True,
+            )
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert info["python-version"] == "3.7"
+        assert (
+            info["container-id"]
+            == client.containers(
+                filters={"ancestor": image_name, "name": container_name},
+                all=True,
+                quiet=True,
+            )[0]["Id"]
+        )
+        assert "5.3.1" in info["python-packages"]["pyyaml"]
+        assert "libpng" in info["system-packages"]
+        assert 0 < len(info["system-packages"]["libpng"]["files"])
+
+        assert build_path.exists()
+        assert (build_path / "python" / "yaml").exists()
+        for file in info["system-packages"]["libpng"]["files"]:
+            path = PurePosixPath(file)
+            assert (build_path / "system" / path.name).exists()
+
+        # removing all dependency files should remove all dependencies
+        process_requirements(
+            (),
+            None,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {} == info["python-packages"]
+        assert {} == info["system-packages"]
+        assert not (build_path / "python").exists()
+        assert not (build_path / "system").exists()
+
+        # this constraint file should be ignored
+        constraints = build / "constraints"
+        constraints.mkdir(exist_ok=True)
+        with (constraints / "file.txt").open("w") as stream:
+            stream.write("pyyaml==5.3.0")
+
+        # new dependencies
+        with requirements.open("w") as stream:
+            stream.write("pyyaml<5.3.2\nxlrd!=1.2.0,<2.0,>=1.0.1")
+        with system_requirements.open("w") as stream:
+            stream.write(
+                "version: 0.1.0\n"
+                "filetypes:\n"
+                "  - .so\n"
+                "packages:\n"
+                "  - libpng\n"
+                "  - libwebp\n"
+            )
+
+        process_requirements(
+            (requirements,),
+            system_requirements,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+            reinstall_system=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"pyyaml", "xlrd"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["pyyaml"] == "5.3.1"
+        assert info["python-packages"]["xlrd"] == "1.1.0"
+        assert "libpng" in info["system-packages"]
+        assert "libwebp" in info["system-packages"]
+        assert (build_path / "python" / "yaml").exists()
+        assert (build_path / "python" / "xlrd").exists()
+        for package in ("libpng", "libwebp"):
+            for file in info["system-packages"][package]["files"]:
+                path = PurePosixPath(file)
+                assert (build_path / "system" / path.name).exists()
+
+        # deleting dependencies
+        libpng_files = info["system-packages"]["libpng"]["files"]
+        with requirements.open("w") as stream:
+            stream.write(
+                "# comments should be allowed in files\n"
+                "xlrd!=1.2.0,<2.0,>=1.0.1\n"
+                "\n\n\n\n"
+                "# blank lines too!"
+            )
+        with system_requirements.open("w") as stream:
+            stream.write(
+                "version: 0.1.0\n"
+                "filetypes:\n"
+                "  - .so\n"
+                "packages:\n"
+                "  - libpng\n"
+                "  - libwebp\n"
+                "skip:\n"
+                "  - libpng"
+            )
+
+        process_requirements(
+            (requirements,),
+            system_requirements,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"pyyaml", "xlrd"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["pyyaml"] == "5.3.1"
+        assert info["python-packages"]["xlrd"] == "1.1.0"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert (build_path / "python" / "yaml").exists()
+        assert (build_path / "python" / "xlrd").exists()
+        for file in info["system-packages"]["libwebp"]["files"]:
+            path = PurePosixPath(file)
+            assert (build_path / "system" / path.name).exists()
+        for file in libpng_files:
+            path = PurePosixPath(file)
+            assert not (build_path / "system" / path.name).exists()
+
+        # rebuilding shouldn't affect python dependencies
+        filepath = info["system-packages"]["libwebp"]["files"][0]
+        with system_requirements.open("w") as stream:
+            stream.write(
+                "version: 0.1.0\n"
+                "filetypes:\n"
+                "  - .so\n"
+                "packages:\n"
+                f"  libwebp: {filepath}"
+            )
+
+        process_requirements(
+            (requirements,),
+            system_requirements,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+            rebuild_image=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"xlrd"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["xlrd"] == "1.1.0"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert [filepath] == info["system-packages"]["libwebp"]["files"]
+        assert (build_path / "python" / "yaml").exists()
+        assert (build_path / "python" / "xlrd").exists()
+        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+        # private dependency ( and constraint file)
+        with requirements.open("w") as stream:
+            stream.write(f"xlrd\n{url}@1.1.2")
+
+        constraint = tmp_path / "constraint.txt"
+        with constraint.open("w") as stream:
+            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1")
+
+        process_requirements(
+            (requirements,),
+            system_requirements,
+            build,
+            image_name,
+            container_name,
+            python_version="3.7",
+            no_secrets=True,
+            reinstall_python=True,
+            pip_args={"plz": ["--no-use-pep517"]},
+            freeze=True,
+            constraints=[constraint],
+        )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"plz"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["plz"] == "1.1.2"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert [filepath] == info["system-packages"]["libwebp"]["files"]
+        assert (build_path / "python" / "plz").exists()
+        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+        freeze = build / "frozen-requirements.txt"
+        expected = [
+            "certifi",
+            "chardet",
+            "docker",
+            "idna",
+            "plz",
+            "PyYAML",
+            "requests",
+            "six",
+            "urllib3",
+            "websocket-client",
+            "xlrd",
+        ]
+        with freeze.open("r") as stream:
+            for line in stream.read().splitlines():
+                if expected[0] == "plz":
+                    assert line == "plz==1.1.2"
+                elif expected[0] == "xlrd":
+                    assert line == "xlrd==1.1.0"
+                else:
+                    match = re.search(r"^([\w_-]+)==\d+\.\d+(?:\.\d+)?$", line)
+                    assert match.group(1) == expected[0]
+
+                expected.pop(0)
+
+        assert expected == []
+
+        # invalid image
+        with pytest.raises(ValueError):
+            process_requirements(
+                (requirements,),
+                system_requirements,
+                build,
+                image_name,
+                container_name,
+                python_version="3.8",
+                no_secrets=True,
+            )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"plz"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["plz"] == "1.1.2"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert [filepath] == info["system-packages"]["libwebp"]["files"]
+        assert (build_path / "python" / "plz").exists()
+        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+        # invalid system_requirements
+        invalid_system_requirements = tmp_path / "invalid.yaml"
+        with invalid_system_requirements.open("w") as stream:
+            stream.write(
+                "version: 0.2.0\n"
+                "filetypes:\n"
+                "  - .so\n"
+                "packages:\n"
+                f"  libwebp: {filepath}"
+            )
+
+        with pytest.raises(ValueError):
+            process_requirements(
+                (requirements,),
+                invalid_system_requirements,
+                build,
+                image_name,
+                container_name,
+                python_version="3.7",
+                no_secrets=True,
+            )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"plz"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["plz"] == "1.1.2"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert [filepath] == info["system-packages"]["libwebp"]["files"]
+        assert (build_path / "python" / "plz").exists()
+        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+        # non-existent requirement
+        with requirements.open("w") as stream:
+            stream.write(f"{url}@0.0.0")
+
+        with pytest.raises(Exception):
+            process_requirements(
+                (requirements,),
+                system_requirements,
+                build,
+                image_name,
+                container_name,
+                python_version="3.7",
+                no_secrets=True,
+            )
+
+        build_info = build_path / "build-info.json"
+        assert build_info.exists()
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert {"plz"} <= set(info["python-packages"].keys())
+        assert info["python-packages"]["plz"] == "1.1.2"
+        assert {"libwebp"} == set(info["system-packages"].keys())
+        assert [filepath] == info["system-packages"]["libwebp"]["files"]
+        assert (build_path / "python" / "plz").exists()
+        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
+
+
+def test_build_package_only_files(mock_api_client, tmp_path):
+    from plz.build import build_package
+
+    build_path = Path(tmp_path / "build")
+    files_path = Path(tmp_path / "files")
+    package_info = build_path / "package-info.json"
 
     files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
 
     files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
+    for path in files:
+        if path.suffix == ".py":
+            with path.open("w") as stream:
+                stream.write("# test")
         else:
-            f.mkdir()
+            path.mkdir()
 
-    zipfile = build_package(build_path, *files)
+    zipfile = build_package(build_path, *files, python_version="3.7")
     assert zipfile == build_path / "package.zip"
 
+    file_hashes = {
+        str(path.absolute()): hash_file(path) for path in files if path.is_file()
+    }
 
-def test_build_package_only_files_no_build_info(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
+    with package_info.open("r") as stream:
+        info = json.load(stream)
 
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] is None
 
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"file1.py", "file2.py"}
 
-    zipfile = build_package(build_path, *files)
-    assert zipfile == build_path / "package.zip"
+    # rerunning should not force a rezip
+    mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
+    assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert hash_file(zipfile) == contents
+    assert zipfile.stat().st_mtime == mtime
 
-
-def test_build_package_only_files_same_build_info(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
-
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
-
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
-
-    zipfile = build_package(build_path, *files)
-    assert zipfile == build_path / "package.zip"
-
-    # This invocation will return early since build_info will be the same
-    zipfile = build_package(build_path, *files)
-    assert zipfile == build_path / "package.zip"
-
-
-def test_build_package_with_requirements_force_and_prefix(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
-
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
-
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
-
-    requirements = Path(tmpdir / "requirements.txt")
-    with requirements.open("w") as f:
-        f.write("pg8000")
-    yum_requirements = Path(tmpdir / "yum.yaml")
-    with yum_requirements.open("w") as f:
-        f.write("libpng:\n  - /usr/lib64/libpng15.so.15")
-
-    # Make sure something exists in the env
-    env = build_path / "package-env"
-    (env / "pg8000").mkdir(parents=True)
-    (env / "pg8000" / "test.py").write_text("# test")
-
-    zipfile = build_package(
-        build_path,
-        *files,
-        requirements=requirements,
-        yum_requirements=yum_requirements,
-        zipped_prefix=Path("prefix"),
-        force=True,
+    # rezip should force a rezip
+    assert zipfile == build_package(
+        build_path, *files, python_version="3.7", rezip=True
     )
-    assert zipfile == build_path / "package.zip"
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"file1.py", "file2.py"}
+
+    # updating a file should force a rezip
+    with files[0].open("w") as stream:
+        stream.write("print('hello')")
+    file_hashes = {
+        str(path.absolute()): hash_file(path) for path in files if path.is_file()
+    }
+    mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
+
+    assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info["version"] != "fake"
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] is None
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"file1.py", "file2.py"}
+        for name in z.namelist():
+            with z.open(name) as zstream, (files_path / name).open("rb") as stream:
+                assert zstream.read() == stream.read()
+
+    # adding a prefix should force a rezip
+    mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="3.7"
+    )
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
+
+    # adding a file should force a rezip
+    new_file = files_path / "new.py"
+    with new_file.open("w") as stream:
+        stream.write("print('hello')")
+    files.append(new_file)
+    file_hashes = {
+        str(path.absolute()): hash_file(path) for path in files if path.is_file()
+    }
+    contents = hash_file(zipfile)
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="3.7"
+    )
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {
+            "lambda/file1.py",
+            "lambda/file2.py",
+            "lambda/new.py",
+        }
+
+    # removing a file should force a rezip
+    del files[-1]
+    file_hashes = {
+        str(path.absolute()): hash_file(path) for path in files if path.is_file()
+    }
+    mtime = zipfile.stat().st_mtime
+    contents = hash_file(zipfile)
+
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="3.7"
+    )
+    assert hash_file(zipfile) != contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
+
+    # modifying the zipfile should force a rezip
+    contents = hash_file(zipfile)
+
+    with zipfile.open("w") as stream:
+        stream.write("fake!")
+
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="3.7"
+    )
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
+
+    # changing python shouldn't affect file-only zips
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="2.7"
+    )
+    assert hash_file(zipfile) == contents
+    assert zipfile.stat().st_mtime == mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
+
+    # invalid package info version should force a rezip
+    with update_json(package_info) as info:
+        info["version"] = "fake"
+
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, *files, zipped_prefix="lambda", python_version="3.7"
+    )
+    assert hash_file(zipfile) == contents
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with package_info.open("r") as stream:
+        info = json.load(stream)
+
+    assert info.get("system", {}) == {}
+    assert info.get("python", {}) == {}
+    assert info["files"] == file_hashes
+    assert info["prefix"] == "lambda"
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
+
+    # different file hierarch should for a rezip
+    (files_path / "new.py").unlink()  # need to make directory the same
+    mtime = zipfile.stat().st_mtime
+
+    assert zipfile == build_package(
+        build_path, files_path, zipped_prefix="lambda", python_version="3.7"
+    )
+    if not SKIP_MTIME_CHECKS:
+        assert zipfile.stat().st_mtime != mtime
+
+    with ZipFile(zipfile, "r") as z:
+        assert set(z.namelist()) == {"lambda/files/file1.py", "lambda/files/file2.py"}
 
 
-def test_build_package_failure(mock_api_client_error, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
+@requires_docker
+def test_build_package(tmp_path):
+    from plz.build import build_package
 
-    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
+    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+    if ci_build_token:
+        url = (
+            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+            "/invenia/plz.git"
+        )
+    else:
+        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
 
-    files_path.mkdir()
-    for f in files:
-        if str(f).endswith(".py"):
-            with f.open("w") as x:
-                x.write("# test")
-        else:
-            f.mkdir()
+    with cleanup_image() as image_name:
+        build_path = Path(tmp_path / "build")
+        files_path = Path(tmp_path / "files")
+        package_info = build_path / "package-info.json"
 
-    requirements = Path(tmpdir / "requirements.txt")
-    with requirements.open("w") as f:
-        f.write("pg8000")
+        files = [
+            files_path / "file1.py",
+            files_path / "file2.py",
+            files_path / "testpath",
+        ]
 
-    with pytest.raises(APIError):
-        build_package(build_path, *files, requirements=requirements)
+        files_path.mkdir()
+        for path in files:
+            if path.suffix == ".py":
+                with path.open("w") as stream:
+                    stream.write("print('hi')")
+            else:
+                path.mkdir()
 
+        requirements = tmp_path / "requirements.txt"
+        with requirements.open("w") as stream:
+            stream.write(f"pyyaml\n{url}@1.1.2")
 
-def test_build_package_update_nested_file(mock_api_client, tmpdir):
-    build_path = Path(tmpdir / "build")
-    files_path = Path(tmpdir / "files")
-    build_info_path = build_path / "build-info.json"
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            python_version="3.7",
+            no_secrets=True,
+            pip_args={"plz": ["--no-use-pep517"]},
+        )
+        assert zipfile == build_path / "package.zip"
 
-    root_directory = files_path / "root_directory"
-    root_directory.mkdir(parents=True)
-    nested_directory = root_directory / "nested_directory"
-    nested_directory.mkdir()
-    nested_file = nested_directory / "nested_file.txt"
-    nested_file.write_text("test")
+        file_hashes = {
+            str(path.absolute()): hash_file(path) for path in files if path.is_file()
+        }
+        requirements_hashes = {str(requirements.absolute()): hash_file(requirements)}
 
-    build_package(build_path, root_directory)
-    original_build_info = json.loads(build_info_path.read_text())
+        with package_info.open("r") as stream:
+            info = json.load(stream)
 
-    # Update the last modified time of the nested file
-    new_modified_time = original_build_info["files"][str(root_directory)] + 10
-    os.utime(nested_file, (new_modified_time, new_modified_time))
+        assert info.get("system", {}) == {}
+        assert info.get("python", {}) == requirements_hashes
+        assert info["files"] == file_hashes
+        assert info["prefix"] is None
 
-    # Make sure that rebuilding the package detects that the directory was updated
-    build_package(build_path, root_directory)
-    new_build_info = json.loads(build_info_path.read_text())
-    assert new_build_info["files"][str(root_directory)] == new_modified_time
+        with ZipFile(zipfile, "r") as z:
+            assert set(z.namelist()) >= {
+                "file1.py",
+                "file2.py",
+                "yaml/__init__.py",
+                "plz/__init__.py",
+            }
+
+        # rerun shouldn't touch zip
+        mtime = zipfile.stat().st_mtime
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            python_version="3.7",
+            no_secrets=True,
+            pip_args={"plz": ["--no-use-pep517"]},
+        )
+        assert zipfile == build_path / "package.zip"
+        assert zipfile.stat().st_mtime == mtime
+        with ZipFile(zipfile, "r") as z:
+            assert set(z.namelist()) >= {
+                "file1.py",
+                "file2.py",
+                "yaml/__init__.py",
+                "plz/__init__.py",
+            }
+
+        # force with a different python
+        mtime = zipfile.stat().st_mtime
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            python_version="3.8",
+            no_secrets=True,
+            force=True,
+            pip_args={"plz": ["--no-use-pep517"]},
+        )
+        assert zipfile == build_path / "package.zip"
+        assert zipfile.stat().st_mtime != mtime
+        with ZipFile(zipfile, "r") as z:
+            assert set(z.namelist()) >= {
+                "file1.py",
+                "file2.py",
+                "yaml/__init__.py",
+                "plz/__init__.py",
+            }
+
+        # non-existent requirement
+        with requirements.open("w") as stream:
+            stream.write(f"{url}@0.0.0")
+
+        with pytest.raises(Exception):
+            build_package(
+                build_path,
+                *files,
+                image_name=image_name,
+                requirements=requirements,
+                python_version="3.7",
+                no_secrets=True,
+            )
+
+        with package_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert info.get("system", {}) == {}
+        assert info.get("python", {}) == {}
+        assert info["files"] == {}
+        assert info["prefix"] is None
+        assert info["zip"] is None
+        assert not zipfile.exists()
+
+        # freeze and constraints
+        with requirements.open("w") as stream:
+            stream.write("xlrd")
+
+        constraint = tmp_path / "constraints.txt"
+        with constraint.open("w") as stream:
+            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1\nrequests==1.1.1")
+
+        freeze = tmp_path / "frozen.txt"
+
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            python_version="3.7",
+            no_secrets=True,
+            force=True,
+            constraints=constraint,
+            freeze=freeze,
+            rebuild_image=True,
+        )
+
+        build_info = build_path / "build-info.json"
+        with build_info.open("r") as stream:
+            info = json.load(stream)
+
+        assert info.get("system-packages", {}) == {}
+        assert info.get("python-packages", {}) == {"xlrd": "1.1.0"}
+
+        assert freeze.exists()
+        with freeze.open("r") as stream:
+            assert stream.read() == "xlrd==1.1.0\n"
+
+        # real-world test. what datafeeds needs
+        with requirements.open("w") as stream:
+            stream.write("pygrib")
+
+        system_requirements = tmp_path / "system.yaml"
+        with system_requirements.open("w") as stream:
+            stream.write(
+                "version: 0.1.0\n"
+                "filetypes:\n"
+                "  - .so\n"
+                "packages:\n"
+                "  - libgomp\n"
+                "  - grib_api-devel"
+            )
+
+        zipfile = build_package(
+            build_path,
+            *files,
+            image_name=image_name,
+            requirements=requirements,
+            system_requirements=system_requirements,
+            python_version="3.8",
+            no_secrets=True,
+            force=True,
+        )
+
+        directory = tmp_path / "package"
+        ZipFile(zipfile).extractall(directory)
+
+        for file in files:
+            if file.is_file():
+                assert (directory / file.relative_to(files_path)).exists()
+
+        assert (directory / "eccodes").exists()
+
+        for library in ("libgomp", "libjpeg", "libgfortran", "libeccodes"):
+            so_file = None
+            for path in directory.iterdir():
+                if path.name.startswith(library) and path.suffix.startswith(".so"):
+                    so_file = path
+                    break
+            else:
+                print(library)
+
+            assert so_file is not None

@@ -1,5 +1,14 @@
+import json
+import os
+from contextlib import contextmanager
+from functools import wraps
+from hashlib import sha256
 from pathlib import Path
+from typing import Dict, Generator, Optional
+from uuid import uuid4
 
+import pytest
+from docker import APIClient
 from docker.errors import APIError, ImageNotFound
 
 
@@ -97,3 +106,63 @@ class MockAPIClient(object):
 class MockAPIClientError(MockAPIClient):
     def build(self, *args, **kwargs):
         raise APIError("test api error")
+
+
+@contextmanager
+def cleanup_image(name: Optional[str] = None) -> Generator[str, None, None]:
+    """
+    Generate a docker name that will be fully cleaned up on manager exit.
+
+    Args:
+        name (:obj:`Optional[str]`): The name to use for the image. If
+            unsupplied, a unique name will be automatically generated.
+    """
+    if name is None:
+        name = f"test-image-{uuid4()}"
+
+    try:
+        yield name
+    finally:
+        client = APIClient()
+
+        for container in client.containers(
+            filters={"ancestor": name}, quiet=True, all=True
+        ):
+            client.remove_container(container["Id"], force=True)
+
+        if client.images(name=name):
+            client.remove_image(name)
+
+
+@contextmanager
+def update_json(path: Path) -> Generator[Dict, None, None]:
+    """
+    Load a json file containing a dictionary and then save it again on exit
+    """
+    with path.open("r") as stream:
+        info = json.load(stream)
+
+    yield info
+
+    with path.open("w") as stream:
+        json.dump(info, stream)
+
+
+def requires_docker(function):
+    """
+    Skip this test if the environment doesn't have docker.
+    """
+
+    @pytest.mark.skipif(
+        os.environ.get("NODOCKER") == "1", reason="This test needs docker to run"
+    )
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return function(*args, **kwargs)
+
+    return wrapper
+
+
+def hash_file(path: Path) -> str:
+    with path.open("rb") as stream:
+        return sha256(stream.read()).hexdigest()
