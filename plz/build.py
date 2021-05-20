@@ -9,7 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 from shutil import copy2, rmtree
 from subprocess import check_output
-from typing import Dict, List, Optional, Sequence, Set, Union
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -22,6 +22,7 @@ from plz.plzdocker import (
     DEFAULT_PYTHON,
     INSTALL_PATH,
     SUPPORTED_PYTHON,
+    PipRequirement,
     build_docker_image,
     copy_system_packages,
     delete_docker_image,
@@ -132,6 +133,7 @@ def build_package(
     Raises:
         :obj:`BaseException`: If anything goes wrong
     """
+
     if image_name is None:
         image_name = DOCKER_IMAGE_NAME.format(version=python_version)
 
@@ -480,6 +482,8 @@ def process_requirements(
             if pip_args is None:
                 pip_args = {}
 
+            requirement_groups: Dict[Tuple[str, ...], List[PipRequirement]] = {}
+
             # pip install all requirements files
             for path in requirements:
                 with path.open() as stream:
@@ -543,72 +547,93 @@ def process_requirements(
 
                         # Allow people to specify args by the full line, the name,
                         # or the lowercased name. Search most-to-least specific
-                        install_args = pip_args.get(
-                            requirement_line, pip_args.get(name, pip_args.get(key, []))
+                        install_args = tuple(
+                            pip_args.get(
+                                requirement_line,
+                                pip_args.get(name, pip_args.get(key, [])),
+                            )
                         )
 
-                        try:
-                            info["python-packages"][name] = pip_install(
-                                client,
-                                container_id,
-                                requirement_line,
-                                install_args,
-                                name=name,
+                        if install_args not in requirement_groups:
+                            requirement_groups[install_args] = []
+
+                        requirement_groups[install_args].append(
+                            PipRequirement(requirement_line, name)
+                        )
+
+            for install_args, pip_requirements in requirement_groups.items():
+                try:
+                    installed_versions = pip_install(
+                        client,
+                        container_id,
+                        pip_requirements,
+                        pip_args=install_args,
+                    )
+
+                except Exception:
+                    if not no_secrets:
+                        raise
+
+                    # try again downloading first
+                    downloaded_requirements = []
+                    for pip_requirement in pip_requirements:
+                        cmd = [
+                            "pip",
+                            "download",
+                            "--dest",
+                            str(download_directory),
+                        ]
+
+                        for constraint in constraints:
+                            cmd.extend(("--constraint", str(constraint)))
+
+                        for index, argument in enumerate(install_args):
+                            if argument in CROSS_ARGUMENTS:
+                                end_index = index + CROSS_ARGUMENTS[argument] + 1
+                                cmd.extend(install_args[index:end_index])
+
+                        for argset in (
+                            ("--platform", "linux_x86_64"),
+                            ("--abi", f"cp{python_version.replace('.', '')}"),
+                            ("--python-version", python_version),
+                            ("--no-deps",),
+                        ):
+                            if argset[0] not in cmd:
+                                cmd.extend(argset)
+
+                        cmd.append(pip_requirement.requirement_entry)
+
+                        logging.info("Downloading package: %s", cmd)
+                        for line in check_output(cmd, text=True).splitlines():
+                            match = re.search(
+                                r"^\s*(?:Saved|File was already downloaded) (.*?)$",
+                                line,
                             )
-                        except Exception:
-                            if not no_secrets:
-                                raise
+                            if match:
+                                location = Path(match.group(1))
 
-                            # try again downloading first
-                            cmd = [
-                                "pip",
-                                "download",
-                                "--dest",
-                                str(download_directory),
-                            ]
-
-                            for constraint in constraints:
-                                cmd.extend(("--constraint", str(constraint)))
-
-                            for index, argument in enumerate(install_args):
-                                if argument in CROSS_ARGUMENTS:
-                                    end_index = index + CROSS_ARGUMENTS[argument] + 1
-                                    cmd.extend(install_args[index:end_index])
-
-                            for argset in (
-                                ("--platform", "linux_x86_64"),
-                                ("--abi", f"cp{python_version.replace('.', '')}"),
-                                ("--python-version", python_version),
-                                ("--no-deps",),
-                            ):
-                                if argset[0] not in cmd:
-                                    cmd.extend(argset)
-
-                            cmd.append(requirement_line)
-
-                            logging.info("Downloading package: %s", cmd)
-                            for line in check_output(cmd, text=True).splitlines():
-                                match = re.search(
-                                    r"^\s*(?:Saved|File was already downloaded) (.*?)$",
-                                    line,
+                                downloaded_requirement = str(
+                                    docker_download_directory / location.name
                                 )
-                                if match:
-                                    location = Path(match.group(1))
-
-                                    requirement_line = str(
-                                        docker_download_directory / location.name
+                                downloaded_requirements.append(
+                                    PipRequirement(
+                                        downloaded_requirement,
+                                        pip_requirement.package_name,
                                     )
-                                    break
-                            else:
-                                raise ValueError(f"downloading {name} failed")
+                                )
+                                break
+                        else:
+                            raise ValueError(f"downloading {name} failed")
 
-                            info["python-packages"][name] = pip_install(
-                                client,
-                                container_id,
-                                requirement_line,
-                                install_args,
-                                name=name,
-                            )
+                    installed_versions = pip_install(
+                        client,
+                        container_id,
+                        downloaded_requirements,
+                        pip_args=install_args,
+                    )
+
+                for name, version in installed_versions.items():
+                    info["python-packages"][name] = version
 
         if freeze:
             if isinstance(freeze, bool):
