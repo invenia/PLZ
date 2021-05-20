@@ -356,6 +356,10 @@ def test_process_requirements(tmp_path):
         assert (build_path / "system" / PurePosixPath(filepath).name).exists()
 
         freeze = build / "frozen-requirements.txt"
+        # Note: temporarily removing six from the expected output.
+        # The docker package should have six as a dependency (it uses six),
+        # but it currently is not declared in docker's requirements
+        # https://github.com/docker/docker-py/issues/2842
         expected = [
             "certifi",
             "chardet",
@@ -364,7 +368,6 @@ def test_process_requirements(tmp_path):
             "plz",
             "PyYAML",
             "requests",
-            "six",
             "urllib3",
             "websocket-client",
             "xlrd",

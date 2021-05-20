@@ -563,6 +563,7 @@ def test_delete_docker_container():
 @requires_docker
 def test_pip_install(tmp_path):
     from plz.plzdocker import (
+        PipRequirement,
         build_docker_image,
         fix_file_permissions,
         pip_install,
@@ -578,29 +579,40 @@ def test_pip_install(tmp_path):
         container_id = start_docker_container(
             client, container_name, tmp_path, image_name, no_secrets=True
         )
-
-        assert "5.3.1" == pip_install(
-            client, container_id, "pyyaml==5.3.1", name="pyyaml"
+        assert {"pyyaml": "5.3.1"} == pip_install(
+            client, container_id, PipRequirement("pyyaml==5.3.1", "pyyaml")
         )
-        assert "1.1.0" == pip_install(
-            client, container_id, "xlrd!=1.2.0,<2.0,>=1.0.1", name="xlrd"
+        assert {"xlrd": "1.1.0"} == pip_install(
+            client, container_id, PipRequirement("xlrd!=1.2.0,<2.0,>=1.0.1", "xlrd")
         )
 
         # no constraints
-        requests_version = pip_install(client, container_id, "requests")
+        requests_version = pip_install(
+            client, container_id, PipRequirement("requests")
+        )["requests"]
         assert requests_version is not None
 
         # updated constraint
         other_requests = pip_install(
-            client, container_id, f"requests!={requests_version}", name="requests"
-        )
+            client,
+            container_id,
+            PipRequirement(f"requests!={requests_version}", "requests"),
+        )["requests"]
         assert requests_version != other_requests
         assert other_requests is not None
 
-        assert requests_version == pip_install(client, container_id, "requests")
+        assert (
+            requests_version
+            == pip_install(client, container_id, PipRequirement("requests"))["requests"]
+        )
 
         # make sure it doesn't error if it doesn't know a name to search pip show
-        assert pip_install(client, container_id, "openpyxl>1.0.0") is None
+        assert (
+            pip_install(client, container_id, PipRequirement("openpyxl>1.0.0"))[
+                "openpyxl>1.0.0"
+            ]
+            is None
+        )
 
         python_directory = tmp_path / "python"
         assert python_directory.is_dir()
@@ -625,7 +637,9 @@ def test_pip_install(tmp_path):
         with (constraints / "file.txt").open("w") as stream:
             stream.write(f"xlrd!=1.2.0,<2.0,>=1.0.1\nrequests=={requests_version}")
 
-        assert "1.1.0" == pip_install(client, container_id, "xlrd")
+        assert {"xlrd": "1.1.0"} == pip_install(
+            client, container_id, PipRequirement("xlrd")
+        )
 
         assert python_directory.is_dir()
         assert (python_directory / "xlrd-1.1.0.dist-info").exists()

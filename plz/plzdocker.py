@@ -4,7 +4,17 @@ import re
 import sys
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from typing import Dict, Iterable, List, Optional, Sequence, Union, cast
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+)
 
 import docker  # type: ignore
 from docker.errors import APIError, ImageNotFound  # type: ignore
@@ -35,6 +45,11 @@ ENV HOME {HOME_PATH}
 DOCKER_IMAGE_VERSION = "0.1.0"
 BUILD_INFO_FILENAME = "build-info.json"
 BUILD_INFO_VERSION = "0.1.0"
+
+
+class PipRequirement(NamedTuple):
+    requirement_entry: str
+    package_name: Optional[str] = None
 
 
 def build_docker_image(
@@ -359,24 +374,25 @@ def delete_docker_container(client: docker.APIClient, container_id: str):
 def pip_install(
     client: docker.APIClient,
     container_id: str,
-    requirement: str,
-    pip_args: Optional[List[str]] = None,
-    name: Optional[str] = None,
-) -> Optional[str]:
+    requirements: Union[PipRequirement, List[PipRequirement]],
+    pip_args: Optional[Union[List[str], Tuple[str, ...]]] = None,
+) -> Dict[str, Optional[str]]:
     """
-    Pip install the python `dependency` in the docker container `container_id`.
-    Returns the version installed.
+    Pip install multiple python `requirements` in the docker container `container_id`.
+    Returns a dict of the versions installed.
 
     Args:
         client (:obj:`docker.APIClient`): Docker APIClient object
         container_id (:obj:`str`): The id of the container to use
-        dependency (:obj:`str`): The python library to install
+        requirements (:obj:`Union[PipRequirement, List[PipRequirement]`): The python
+            libraries to install
         pip_args (:obj:`Optional[dict[str, list[str]]]`): Additional pip install args.
 
     Raises:
         :obj:`docker.errors.APIError`: If any docker error occurs
     """
-    version = None
+    if isinstance(requirements, PipRequirement):
+        requirements = [requirements]
 
     if pip_args is None:
         pip_args = []
@@ -407,46 +423,53 @@ def pip_install(
             cmd.extend(("--constraint", path))
 
     cmd.extend(pip_args)
-    cmd.append(requirement)
+    cmd.extend(requirement.requirement_entry for requirement in requirements)
 
-    logging.info("Pip Install %s: %s", requirement, cmd)
+    logging.info("Pip Installing %s:\nRunning: %s", requirements, cmd)
     run_docker_command(client, container_id, cmd, environment=ENVIRONMENT)
     logging.info("Pip Install Complete")
 
     # pip show is often wrong if a package has been downgraded so try
     # grabbing a version interactively
-    if name is not None:
-        try:
-            version = run_docker_command(
-                client,
-                container_id,
-                ["python", "-c", f"import {name};print({name}.__version__)"],
-                environment=ENVIRONMENT,
-            ).strip()
-        except Exception:
-            # package may not provide __version__. name may not be module
-            # name (e.g., PyYAML vs yaml)
-            pass
+    versions = {}
+    for requirement in requirements:
+        version = None
+        name = requirement.package_name
 
-    if version is None:
-        if name is None:
-            name = requirement
+        if name is not None:
+            try:
+                version = run_docker_command(
+                    client,
+                    container_id,
+                    ["python", "-c", f"import {name};print({name}.__version__)"],
+                    environment=ENVIRONMENT,
+                ).strip()
+            except Exception:
+                # package may not provide __version__. name may not be module
+                # name (e.g., PyYAML vs yaml)
+                pass
 
-        try:
-            result = run_docker_command(
-                client, container_id, ["pip", "show", name], environment=ENVIRONMENT
-            )
+        if version is None:
+            if name is None:
+                name = requirement.requirement_entry
 
-            for line in result.splitlines():
-                match = re.search(r"^Version: (.*?)$", line)
+            try:
+                result = run_docker_command(
+                    client, container_id, ["pip", "show", name], environment=ENVIRONMENT
+                )
 
-                if match:
-                    version = match.group(1)
-                    break
-        except Exception:
-            logging.exception("Unable to work out installed version for %s", name)
+                for line in result.splitlines():
+                    match = re.search(r"^Version: (.*?)$", line)
 
-    return version
+                    if match:
+                        version = match.group(1)
+                        break
+            except Exception:
+                logging.exception("Unable to work out installed version for %s", name)
+
+        versions[cast(str, name)] = version
+
+    return versions
 
 
 def pip_freeze(
