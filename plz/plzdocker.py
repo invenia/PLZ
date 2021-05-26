@@ -503,9 +503,9 @@ def pip_freeze(
             match = re.search(r"^([\w_-]+) @ ", requirement)
 
             if match:
-                package = match.group(1)
+                package = match.group(1).lower()
 
-                if match.group(1) in versions:
+                if package in versions:
                     requirement = f"{package}=={versions[package]}"
 
             # how windows displays downloaded files

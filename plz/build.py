@@ -558,7 +558,7 @@ def process_requirements(
                             requirement_groups[install_args] = []
 
                         requirement_groups[install_args].append(
-                            PipRequirement(requirement_line, name)
+                            PipRequirement(requirement_line, key)
                         )
 
             for install_args, pip_requirements in requirement_groups.items():
