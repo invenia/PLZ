@@ -574,63 +574,78 @@ def process_requirements(
                     if not no_secrets:
                         raise
 
-                    # try again downloading first
+                    installed_versions = {}
+
+                    # Attempt to install packages individually, falling back to
+                    # downloading locally when necessary
                     downloaded_requirements = []
                     for pip_requirement in pip_requirements:
-                        cmd = [
-                            "pip",
-                            "download",
-                            "--dest",
-                            str(download_directory),
-                        ]
-
-                        for constraint in constraints:
-                            cmd.extend(("--constraint", str(constraint)))
-
-                        for index, argument in enumerate(install_args):
-                            if argument in CROSS_ARGUMENTS:
-                                end_index = index + CROSS_ARGUMENTS[argument] + 1
-                                cmd.extend(install_args[index:end_index])
-
-                        for argset in (
-                            ("--platform", "linux_x86_64"),
-                            ("--abi", f"cp{python_version.replace('.', '')}"),
-                            ("--python-version", python_version),
-                            ("--no-deps",),
-                        ):
-                            if argset[0] not in cmd:
-                                cmd.extend(argset)
-
-                        cmd.append(pip_requirement.requirement_entry)
-
-                        logging.info("Downloading package: %s", cmd)
-                        for line in check_output(cmd, text=True).splitlines():
-                            match = re.search(
-                                r"^\s*(?:Saved|File was already downloaded) (.*?)$",
-                                line,
+                        try:
+                            package_version = pip_install(
+                                client,
+                                container_id,
+                                pip_requirement,
+                                pip_args=install_args,
                             )
-                            if match:
-                                location = Path(match.group(1))
+                            installed_versions.update(package_version)
 
-                                downloaded_requirement = str(
-                                    docker_download_directory / location.name
+                        except Exception:
+                            # Try again, download the package first
+                            cmd = [
+                                "pip",
+                                "download",
+                                "--dest",
+                                str(download_directory),
+                            ]
+
+                            for constraint in constraints:
+                                cmd.extend(("--constraint", str(constraint)))
+
+                            for index, argument in enumerate(install_args):
+                                if argument in CROSS_ARGUMENTS:
+                                    end_index = index + CROSS_ARGUMENTS[argument] + 1
+                                    cmd.extend(install_args[index:end_index])
+
+                            for argset in (
+                                ("--platform", "linux_x86_64"),
+                                ("--abi", f"cp{python_version.replace('.', '')}"),
+                                ("--python-version", python_version),
+                                ("--no-deps",),
+                            ):
+                                if argset[0] not in cmd:
+                                    cmd.extend(argset)
+
+                            cmd.append(pip_requirement.requirement_entry)
+
+                            logging.info("Downloading package: %s", cmd)
+                            for line in check_output(cmd, text=True).splitlines():
+                                match = re.search(
+                                    r"^\s*(?:Saved|File was already downloaded) (.*?)$",
+                                    line,
                                 )
-                                downloaded_requirements.append(
-                                    PipRequirement(
-                                        downloaded_requirement,
-                                        pip_requirement.package_name,
+                                if match:
+                                    location = Path(match.group(1))
+
+                                    downloaded_requirement = str(
+                                        docker_download_directory / location.name
                                     )
-                                )
-                                break
-                        else:
-                            raise ValueError(f"downloading {name} failed")
+                                    downloaded_requirements.append(
+                                        PipRequirement(
+                                            downloaded_requirement,
+                                            pip_requirement.package_name,
+                                        )
+                                    )
+                                    break
+                            else:
+                                raise ValueError(f"downloading {name} failed")
 
-                    installed_versions = pip_install(
-                        client,
-                        container_id,
-                        downloaded_requirements,
-                        pip_args=install_args,
-                    )
+                    if downloaded_requirements:
+                        installed_versions = pip_install(
+                            client,
+                            container_id,
+                            downloaded_requirements,
+                            pip_args=install_args,
+                        )
 
                 for name, version in installed_versions.items():
                     info["python-packages"][name] = version
