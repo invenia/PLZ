@@ -51,7 +51,7 @@ def parse_args(args: Optional[Sequence[str]] = None):
             type=Path,
             action="append",
             help=(
-                "Path to a requirements file for the package. "
+                "Path to a constraint file for the package. "
                 "Can be supplied multiple times."
             ),
         )

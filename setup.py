@@ -12,9 +12,6 @@ DOCS_DEPS = [
     "sphinxcontrib-runcmd",
 ]
 CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-# Note: temporarily adding six as a dependency because the docker package uses six
-# but does not declare it as part of its requirements
-# https://github.com/docker/docker-py/issues/2842
 REQUIREMENTS = ["awscli", "boto3"]
 
 EXTRAS = {
