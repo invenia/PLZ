@@ -239,8 +239,13 @@ def build_zip(
 
         raise
     finally:
-        with zip_info.open("w") as stream:
-            json.dump(info, stream, sort_keys=True, indent=4)
+        try:
+            with zip_info.open("w") as stream:
+                json.dump(info, stream, sort_keys=True, indent=4)
+        except:
+            if zip_info.exists():
+                zip_info.unlink()
+            raise
 
     if bucket:
         if key is None:
@@ -519,8 +524,13 @@ def build_image(
         info = {}
         raise
     finally:
-        with package_info.open("w") as stream:
-            json.dump(info, stream, sort_keys=True, indent=4)
+        try:
+            with package_info.open("w") as stream:
+                json.dump(info, stream, sort_keys=True, indent=4)
+        except Exception:
+            if package_info.exists():
+                package_info.unlink()
+            raise
 
     if ecr_repository:
         if session is None:
