@@ -156,16 +156,12 @@ def build_system_docker_file(
     path: Path,
     packages: List[str],
     python_version: str,
-    platform: str = PLATFORM,
 ):
     """
     Build the docker file for the system image
     """
     with path.open("w") as stream:
-        stream.write(
-            f"FROM --platform={platform} "
-            f"public.ecr.aws/lambda/python:{python_version}\n"
-        )
+        stream.write(f"FROM amazon/aws-lambda-python:{python_version}\n")
         stream.write("RUN yum install -y git\n")
         stream.write("RUN pip install --upgrade pip\n")
         stream.write(f"ENV HOME {HOME_DIRECTORY}")
