@@ -25,7 +25,7 @@ include:
     - pip install tox
     - docker --version
   script:
-    - CI_BUILD_TOKEN=$CI_BUILD_TOKEN SKIP_MTIME_CHECKS=1 tox -re py39
+    - CI_BUILD_TOKEN=$CI_BUILD_TOKEN SKIP_MTIME_CHECKS=1 tox -re py37
     - deactivate
   extends:
     - .save_test_coverage
