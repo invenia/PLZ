@@ -212,12 +212,12 @@ def build_zip(
         if (
             rezip
             or info.get("files", {}) != file_hashes
-            or info.get("prefix") != zipped_prefix
+            or info.get("prefix") != str(zipped_prefix)
             or not filepath.exists()
             or info.get("zip") != get_file_hash(filepath)
         ):
             info["files"] = file_hashes
-            info["prefix"] = zipped_prefix
+            info["prefix"] = ste(zipped_prefix)
 
             zip_package(
                 filepath,
