@@ -74,7 +74,7 @@ def parse_args(args: Optional[Sequence[str]] = None):
             default=Path("build"),
             help="Where to put the build directory for the package.",
         )
-        subparser.add_argument("-i", "--repository", help="What to call the image")
+        subparser.add_argument("-i", "--image", help="What to call the image")
         subparser.add_argument("-t", "--tag", help="What to tag the image")
         subparser.add_argument(
             "-p",
@@ -152,10 +152,10 @@ def main(args: Optional[Sequence[str]] = None):
             constraints=parsed_args.constraints,
             pip_args=parsed_args.pip,
             system_packages=parsed_args.system,
-            repository=parsed_args.repository,
+            image=parsed_args.image,
             tag=parsed_args.tag,
             python_version=parsed_args.python_version,
-            remote_repository=parsed_args.remote,
+            ecr_repository=parsed_args.remote,
             session=session,
             rebuild=parsed_args.rebuild,
         )
@@ -169,7 +169,7 @@ def main(args: Optional[Sequence[str]] = None):
             pip_args=parsed_args.pip,
             system_packages=parsed_args.system,
             zipped_prefix=parsed_args.zipped_prefix,
-            repository=parsed_args.repository,
+            image=parsed_args.image,
             tag=parsed_args.tag,
             python_version=parsed_args.python_version,
             bucket=parsed_args.bucket,

@@ -1,14 +1,12 @@
 import logging
+import os
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 from subprocess import CalledProcessError, check_call, check_output
 from typing import List, Optional, Sequence
 from uuid import uuid4
 
-
-# Current as of 2022-10-04
-DEFAULT_PYTHON = "3.9"
-SUPPORTED_PYTHON = {"3.7", "3.8", "3.9"}
 
 IMAGE_VERSION = "1.0.0"
 PLATFORM = "linux/amd64"
@@ -18,10 +16,112 @@ REQUIREMENTS_DIRECTORY = HOME_DIRECTORY / "requirements"
 CONSTRAINTS_DIRECTORY = HOME_DIRECTORY / "constraints"
 WORKING_DIRECTORY = PurePosixPath("/var/task")
 SECRETS_DIRECTORY = PurePosixPath("/run/secrets")
+IMAGE_VERSION_FILE = HOME_DIRECTORY / "image-version"
+PYTHON_VERSION_FILE = HOME_DIRECTORY / "python-version"
 FREEZE_FILE = HOME_DIRECTORY / "frozen.txt"
 PACKAGE_SCRIPT = HOME_DIRECTORY / "packages.py"
 BASE_PYTHON = HOME_DIRECTORY / "base-python"
 INSTALLED_PYTHON = HOME_DIRECTORY / "installed-python"
+INSTALLED_SYSTEM = HOME_DIRECTORY / "installed-system"
+
+# It's not completely clear whether this length represents the length
+# of the repository + tag or the repository or the tag.
+MAX_TAG_LENGTH = 128
+
+
+def name_image(base: str = None) -> str:
+    """
+    Create a valid name for an image. All image names will have plz-
+    prepended to them.
+
+    base: The base text to turn into an image name. If not supplied,
+        the current working directory will be used.
+    """
+    # valid docker image names are based on
+    # https://docs.docker.com/engine/reference/commandline/tag/
+    if not base:
+        base = Path.cwd().name
+
+    parts = [["plz", "-"]]
+    for symbol in base:
+        if (
+            re.search(r"[A-Za-z0-9]", symbol)
+            or (symbol == "-" and parts[-1] and parts[-1][-1] not in "._")
+            or (symbol in "._" and parts[-1] and parts[-1][-1] not in "._-")
+        ):
+            parts[-1].append(symbol)
+        elif symbol == "/" and parts[-1]:
+            parts.append([])
+
+    return "".join("/".join(["".join(part).rstrip("._-") for part in parts]))[
+        :MAX_TAG_LENGTH
+    ].rstrip("._/-")
+
+
+def validate_image_name(name: str):
+    """
+    Validate that a supplied name is a valid name for a docker image.
+
+    name: The image name to validate.
+    """
+    # valid docker image names are based on
+    # https://docs.docker.com/engine/reference/commandline/tag/
+    section = ""
+    reason = None
+
+    if not name:
+        reason = "Image name can't be blank"
+    elif len(name) > MAX_TAG_LENGTH:
+        reason = f"length ({len(name)}) > max allowed ({MAX_TAG_LENGTH})"
+    else:
+        for part in name.split("/"):
+            if not part:
+                reason = "Empty name section"
+                break
+
+            reason = _validate_part(part)
+            if reason:
+                section = part
+                break
+
+    if reason:
+        if section:
+            section = f", section ({section})"
+
+        raise ValueError(f"Invalid image name ({name})({section}): {reason}")
+
+
+def validate_tag_name(tag: Optional[str]):
+    """
+    Validate that the supplied tag can be used as a docker image tag
+
+    tag: The tag to validate
+    """
+    if not tag:
+        return
+
+    reason = None
+
+    if len(tag) > MAX_TAG_LENGTH:
+        reason = f"length ({len(tag)}) > max allowed ({MAX_TAG_LENGTH})"
+    else:
+        reason = _validate_part(tag)
+
+    if reason:
+        raise ValueError(f"Invalid tag ({tag}): {reason}")
+
+
+def _validate_part(part: str) -> Optional[str]:
+    reason = None
+
+    if not re.search(r"^[A-Za-z0-9]+(?:(?:-+|[._])[A-Za-z0-9]+)*$", part):
+        reason = (
+            "Only upper-/lower-case ASCII, digits, hypens (-), underscores (_), "
+            "and periods (.) are allowed. "
+            "non-alphanumeric characters must be surrounded by alphanumeric characters."
+        )
+
+    return reason
 
 
 def verify_running():
@@ -55,7 +155,7 @@ def verify_running():
 def build_system_docker_file(
     path: Path,
     packages: List[str],
-    python_version: str = DEFAULT_PYTHON,
+    python_version: str,
     platform: str = PLATFORM,
 ):
     """
@@ -81,20 +181,17 @@ def build_system_docker_file(
             f"' > {PACKAGE_SCRIPT}\n"
         )
         stream.write(f"RUN python {PACKAGE_SCRIPT} > {BASE_PYTHON}\n")
-        stream.write(f"RUN echo {IMAGE_VERSION} > {HOME_DIRECTORY / 'image-version'}\n")
-        stream.write(
-            f"RUN echo {python_version} > {HOME_DIRECTORY / 'python-version'}\n"
-        )
-        stream.write(
-            f"RUN yum list installed > {HOME_DIRECTORY / 'installed-system'}\n"
-        )
+        stream.write(f"RUN echo {IMAGE_VERSION} > {IMAGE_VERSION_FILE}\n")
+        stream.write(f"RUN echo {python_version} > {PYTHON_VERSION_FILE}\n")
+
+        for package in packages:
+            stream.write(f"RUN yum install -y {package}\n")
+
+        stream.write(f"RUN yum list installed > {INSTALLED_SYSTEM}\n")
 
         # write these in case system and python images are the same
         stream.write(f"RUN python {PACKAGE_SCRIPT} > {INSTALLED_PYTHON}\n")
         stream.write(f"RUN pip freeze > {FREEZE_FILE}\n")
-
-        for package in packages:
-            stream.write(f"RUN yum install -y {package}\n")
 
 
 def build_python_docker_file(
@@ -143,7 +240,7 @@ def build_python_docker_file(
         stream.write(f"RUN pip freeze > {FREEZE_FILE}\n")
 
 
-def build_docker_file(
+def build_lambda_docker_file(
     path: Path,
     base_image: str,
     files: Sequence[Path],
@@ -156,7 +253,7 @@ def build_docker_file(
 
         stream.write(f"RUN mkdir -p {WORKING_DIRECTORY}\n")
         for file in files:
-            stream.write(f"COPY {file} / {WORKING_DIRECTORY}\n")
+            stream.write(f"COPY {file} {WORKING_DIRECTORY}\n")
 
 
 def get_image(image: str) -> Optional[str]:
@@ -181,7 +278,7 @@ def get_image(image: str) -> Optional[str]:
 def build_image(
     name: str,
     dockerfile: Path,
-    location: Path = Path.cwd(),
+    location: Optional[Path] = None,
     pipconf: Optional[Path] = None,
     ssh: bool = False,
 ) -> str:
@@ -202,13 +299,13 @@ def build_image(
         name,
         "--file",
         str(dockerfile),
-        str(location),
+        str(location or Path.cwd()),
     ]
 
     if pipconf:
         build_command.extend(("--secret", f"id=pipconf,src={pipconf}"))
 
-    if ssh:
+    if ssh and os.environ.get("SSH_AUTH_SOCK"):
         build_command.extend(("--ssh", "default"))
 
     check_call(build_command)
@@ -230,12 +327,12 @@ def delete_image(image: str, force: bool = False) -> bool:
     image_id = get_image(image)
 
     if image_id:
-        remove_command = ["docker", "rmi", image_id]
+        for container_id in get_containers(image=image_id):
+            delete_container(container_id, force=force)
+
+        remove_command = ["docker", "rmi", image]
 
         if force:
-            for container_id in get_containers(image=image_id, running=True):
-                stop_container(container_id)
-
             remove_command.append("--force")
 
         check_call(remove_command)
@@ -297,7 +394,7 @@ def get_containers(
     """
     containers = []
 
-    command = ["docker", "ps", "--quiet"]
+    command = ["docker", "ps", "--quiet", "--no-trunc"]
 
     if name:
         command.extend(("--filter", f"name={name}"))
@@ -386,7 +483,7 @@ def stop_container(id: str, time: Optional[int] = None):
     check_call(command)
 
 
-def remove_container(id: str, force: bool = False):
+def delete_container(id: str, force: bool = False):
     command = ["docker", "rm", id]
 
     if force:

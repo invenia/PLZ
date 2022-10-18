@@ -7,13 +7,11 @@ from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from shutil import rmtree
 from typing import Dict, List, Optional, Sequence, Set, Union
-from uuid import uuid4
 from zipfile import ZipFile
 
 import boto3  # type: ignore
 
 from plz import docker
-from plz.docker import DEFAULT_PYTHON, SUPPORTED_PYTHON
 
 
 __all__ = ["build_image", "build_zip"]
@@ -25,8 +23,13 @@ FROZEN_FILE = "frozen-requirements.txt"
 PACKAGE_INFO_VERSION = "0.2.0"
 
 # lambdas are guaranteed to have boto3/botocore
-IGNORE = {"__pycache__", "boto3", "botocore"}
+IGNORE = {"__pycache__", "awscli", "boto3", "botocore"}
 IGNORE_FILETYPES = {".dist-info", ".egg-info", ".pyc"}
+
+# Current as of 2022-10-04
+DEFAULT_PYTHON = "3.9"
+MIN_PYTHON_VERSION = "3.7"
+MAX_PYTHON_VERSION = "3.9"
 
 
 def build_zip(
@@ -43,9 +46,10 @@ def build_zip(
     filepath: Optional[Path] = None,
     zipped_prefix: Optional[Path] = None,
     # environment options
-    repository: Optional[str] = None,
+    image: Optional[str] = None,
     tag: Optional[str] = None,
     python_version: str = DEFAULT_PYTHON,
+    location: Optional[Path] = None,
     # upload options
     bucket: Optional[str] = None,
     key: Optional[str] = None,
@@ -76,9 +80,10 @@ def build_zip(
     filepath: Where to save the zip file. If not supplied, the
         zip file will be saved in the build directory with the name
         `package.zip`
-    repository: What to name the docker image. Will also create
-        additional layers <repository>-system and <repository>-python
-    tag: what to tag the docker image
+    image: What to name the docker image. Will also create additional
+        layers <image>-system and <image>-python. If unsupplied, the
+        name will be based on the current working directory's name.
+    tag: what to tag the docker image.
     python_version: The version of python to use when building packages.
     bucket: An S3 bucket to upload the zip to.
     key: An S3 key to upload the zip to.
@@ -98,7 +103,7 @@ def build_zip(
 
     zip_info = directory / ZIP_INFO_FILENAME
 
-    rezip = False
+    rezip = rebuild
 
     if zip_info.exists():
         with zip_info.open("r") as stream:
@@ -124,6 +129,11 @@ def build_zip(
         if not requirements:
             if package_directory.exists():
                 rmtree(package_directory)
+                rezip = True
+
+            info["image_id"] = None
+
+            directory.mkdir(parents=True, exist_ok=True)
         else:
             image = build_image(
                 directory,
@@ -131,8 +141,9 @@ def build_zip(
                 constraints=constraints,
                 pip_args=pip_args,
                 system_packages=system_packages,
-                repository=repository,
+                image=image,
                 tag=tag,
+                location=location,
                 python_version=python_version,
                 rebuild=rebuild,
                 freeze=freeze,
@@ -146,6 +157,8 @@ def build_zip(
                 or not package_directory.exists()
             ):
                 rezip = True
+
+                info["image_id"] = image_id
 
                 if package_directory.exists():
                     rmtree(package_directory)
@@ -166,7 +179,7 @@ def build_zip(
                         )
                     except Exception:
                         if container_id:  # incompatible container. make a new one
-                            docker.remove_container(container_id)
+                            docker.delete_container(container_id)
 
                             container_id = docker.start_container(
                                 image,
@@ -187,9 +200,9 @@ def build_zip(
                 base_locations = set(base_python.read_text().split())
                 installed_locations = set(installed_python.read_text().split())
 
-                for location in installed_locations - base_locations:
+                for name in installed_locations - base_locations:
                     docker.copy_from(
-                        container_id, PurePosixPath(location), package_directory
+                        container_id, PurePosixPath(name), package_directory
                     )
 
                 docker.stop_container(container_id)
@@ -199,10 +212,12 @@ def build_zip(
         if (
             rezip
             or info.get("files", {}) != file_hashes
+            or info.get("prefix") != zipped_prefix
             or not filepath.exists()
             or info.get("zip") != get_file_hash(filepath)
         ):
             info["files"] = file_hashes
+            info["prefix"] = zipped_prefix
 
             zip_package(
                 filepath,
@@ -256,11 +271,12 @@ def build_image(
     pip_args: Optional[List[str]] = None,
     system_packages: Optional[List[str]] = None,
     # environment options
-    repository: Optional[str] = None,
+    image: Optional[str] = None,
     tag: Optional[str] = None,
     python_version: str = DEFAULT_PYTHON,
+    location: Optional[Path] = None,
     # upload options
-    remote_repository: Optional[str] = None,
+    ecr_repository: Optional[str] = None,
     session: Optional[boto3.Session] = None,
     # flags
     rebuild: bool = False,
@@ -271,7 +287,7 @@ def build_image(
     into a docker image and optionally upload it to ECR.
 
     Returns the name of the image (will be the remote image if
-    remote_repository is specified)
+    ecr_repository is specified)
 
     directory: The directory to save all build files.
     *files: Any number of files to include. Directories will be
@@ -282,12 +298,13 @@ def build_image(
         files.
     pip_args: a list of arguments to pass to pip.
     system_packages: A list of packages to install.
-    repository: What to name the docker image. Will also create
-        additional layer <repository>-system
-    tag: what to tag the docker image
+    image: What to name the docker image. Will also create additional
+        layers <image>-system and <image>-python. If unsupplied, the
+        name will be based on the current working directory's name.
+    tag: what to tag the docker image.
     container: What to name the docker container.
     python_version: The version of python to use when building packages.
-    remote_repository: An ECR repository to upload the image to.
+    ecr_repository: An ECR repository to upload the image to.
     session: The boto3 session to use when performing S3 operations
     rebuild: Fully rebuild teh image.
     freeze: Generate a freeze file for the package. Can be either
@@ -312,28 +329,40 @@ def build_image(
     if system_packages is None:
         system_packages = []
 
-    if repository is None:
-        repository = f"plz-{uuid4()}"
+    if image is None:
+        image = docker.name_image()
 
         if tag is None:
             tag = python_version
+    else:
+        docker.validate_image_name(image)
 
     if tag is None:
-        system_image = f"{repository}-system"
-        python_image = f"{repository}-python"
-        image = repository
+        system_image = f"{image}-system"
+        python_image = f"{image}-python"
+        lambda_image = image
     else:
-        system_image = f"{repository}-system:{tag}"
-        python_image = f"{repository}-python:{tag}"
-        image = f"{repository}:{tag}"
+        docker.validate_tag_name(tag)
 
-    if python_version not in SUPPORTED_PYTHON:
+        system_image = f"{image}-system:{tag}"
+        python_image = f"{image}-python:{tag}"
+        lambda_image = f"{image}:{tag}"
+
+    if python_version > MAX_PYTHON_VERSION:
         logging.warning(
-            "Python version (%s) does not appear to be supported by AWS Lambda. "
-            "Currently supported versions: %s",
+            "Python version (%s) "
+            "is greater than the latest known supported verion: %s",
             python_version,
-            ", ".join(sorted(SUPPORTED_PYTHON)),
+            MAX_PYTHON_VERSION,
         )
+    elif python_version < MIN_PYTHON_VERSION:
+        raise ValueError(
+            f"Can't build for Python {python_version}: "
+            f"Oldest supported Python {MIN_PYTHON_VERSION}"
+        )
+
+    if location is None:
+        location = Path.cwd()
 
     freeze_file = None
     if freeze:
@@ -362,6 +391,19 @@ def build_image(
     python_hashes = get_file_hashes(requirements)
     constraint_hashes = get_file_hashes(constraints)
 
+    # all copied files need to be relative to docker location
+    relative_files = [
+        path.relative_to(location) if path.is_absolute() else path for path in files
+    ]
+    requirements = [
+        path.relative_to(location) if path.is_absolute() else path
+        for path in requirements
+    ]
+    constraints = [
+        path.relative_to(location) if path.is_absolute() else path
+        for path in constraints
+    ]
+
     rebuild_system = rebuild or info.get("system") != system_packages
     rebuild_python = (
         rebuild_system
@@ -379,7 +421,7 @@ def build_image(
 
         system_id = docker.get_image(system_image)
         python_id = docker.get_image(python_image)
-        image_id = docker.get_image(image)
+        lambda_id = docker.get_image(lambda_image)
 
         if rebuild_system or not system_id:
             system_docker_file = directory / "SystemDockerFile"
@@ -387,26 +429,28 @@ def build_image(
                 system_docker_file, system_packages, python_version
             )
 
-            if system_id:
-                docker.delete_image(system_image)
+            if lambda_id:
+                docker.delete_image(lambda_image)
 
-            if python_image and python_id != system_id:
-                docker.delete_image(python_image)
-
-            if image_id and image_id != python_id:
-                docker.delete_image(image)
-
-            system_id = docker.build_image(system_image, system_docker_file)
-            python_id = image_id = None
-
-        if rebuild_python or not python_id:
             if python_id:
                 docker.delete_image(python_image)
 
-            if image_id and image_id != python_id:
-                docker.delete_image(image)
+            if system_id:
+                docker.delete_image(system_image)
 
-            image_id = None
+            system_id = docker.build_image(
+                system_image, system_docker_file, location=location
+            )
+            python_id = lambda_id = None
+
+        if rebuild_python or not python_id:
+            if lambda_id:
+                docker.delete_image(lambda_image)
+
+            if python_id:
+                docker.delete_image(python_image)
+
+            lambda_id = None
 
             if requirements:
                 home = Path.home()
@@ -428,37 +472,48 @@ def build_image(
                 )
 
                 python_id = docker.build_image(
-                    python_image, python_docker_file, pipconf=pipconf, ssh=True
+                    python_image,
+                    python_docker_file,
+                    pipconf=pipconf,
+                    ssh=True,
+                    location=location,
                 )
             else:
                 docker.tag(system_image, python_image)
                 python_id = system_id
 
-        if update_files or not image_id:
-            if image_id:
-                docker.delete_image(image)
+        if update_files or not lambda_id:
+            if lambda_id:
+                docker.delete_image(lambda_image)
 
-            if files:
-                docker_file = directory / "DockerFile"
-                docker.build_docker_file(docker_file, system_image, files)
-                image_id = docker.build_image(image, docker_file)
+            if relative_files:
+                lambda_docker_file = directory / "DockerFile"
+                docker.build_lambda_docker_file(
+                    lambda_docker_file, python_image, relative_files
+                )
+                lambda_id = docker.build_image(
+                    lambda_image, lambda_docker_file, location=location
+                )
             else:
-                docker.tag(python_image, image)
-                image_id = python_id
+                docker.tag(python_image, lambda_image)
+                lambda_id = python_id
 
         if freeze_file:
-            container = f"{repository}-container"
+            container = f"{image}-container"
             for container_id in docker.get_containers(name=container):
-                docker.remove_container(container_id)
+                docker.delete_container(container_id)
 
             container_id = docker.start_container(
-                image, container, directory=directory, python_version=python_version
+                lambda_image,
+                container,
+                directory=directory,
+                python_version=python_version,
             )
 
             docker.copy_from(container_id, docker.FREEZE_FILE, freeze_file)
 
             docker.stop_container(container_id)
-            docker.remove_container(container_id)
+            docker.delete_container(container_id)
     except Exception:
         logging.exception("Error while building image")
         info = {}
@@ -467,7 +522,7 @@ def build_image(
         with package_info.open("w") as stream:
             json.dump(info, stream, sort_keys=True, indent=4)
 
-    if remote_repository:
+    if ecr_repository:
         if session is None:
             session = boto3.Session()
 
@@ -476,17 +531,17 @@ def build_image(
         sts = session.client("sts")
         account = sts.get_caller_identity()["Account"]
 
-        image = docker.push(
+        lambda_image = docker.push(
             directory,
-            image,
-            remote_repository,
+            lambda_image,
+            ecr_repository,
             account=account,
             profile=profile,
             region=region,
             tag=tag,
         )
 
-    return image
+    return lambda_image
 
 
 def zip_package(
@@ -517,7 +572,6 @@ def zip_package(
     else:
         ignore_filetypes = ignore_filetypes | IGNORE_FILETYPES
 
-    # Delete unnecessary dirs
     with ZipFile(zip_file_path, "w") as z:
         remaining = []
         for file in files:

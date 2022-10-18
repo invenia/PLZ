@@ -3,7 +3,7 @@ from os.path import abspath, dirname, join
 from setuptools import find_packages, setup
 
 
-TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
+TEST_DEPS = ["coverage", "docker", "pytest", "pytest-cov"]
 DOCS_DEPS = [
     "sphinx",
     "sphinx-rtd-theme",
