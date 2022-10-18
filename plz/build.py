@@ -217,7 +217,7 @@ def build_zip(
             or info.get("zip") != get_file_hash(filepath)
         ):
             info["files"] = file_hashes
-            info["prefix"] = ste(zipped_prefix)
+            info["prefix"] = str(zipped_prefix)
 
             zip_package(
                 filepath,
