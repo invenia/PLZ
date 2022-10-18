@@ -289,6 +289,9 @@ def build_image(
     pipconf: The path to the pip config file
     ssh: Include ssh keys
     """
+    env = os.environ.copy()
+    env["DOCKER_BUILDKIT"] = "1"
+
     build_command = [
         "docker",
         "build",
@@ -307,7 +310,7 @@ def build_image(
     if ssh and os.environ.get("SSH_AUTH_SOCK"):
         build_command.extend(("--ssh", "default"))
 
-    check_call(build_command)
+    check_call(build_command, env=env)
 
     image_id = get_image(name)
 
