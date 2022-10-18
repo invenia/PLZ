@@ -484,7 +484,7 @@ def test_build_image(tmp_path):
             client, container_id, ("grep", "^rsync", str(INSTALLED_SYSTEM))
         ).strip()
         client.remove_container(container_id, force=True)
-        # top and layer should be different
+        # all new layers
         new_new_top_id = client.images(image_name)[0]["Id"]
         assert new_new_top_id != new_top_id
         new_python_id = client.images(f"{image_name}-python")[0]["Id"]
@@ -493,6 +493,64 @@ def test_build_image(tmp_path):
         system_id = client.images(f"{image_name}-system")[0]["Id"]
         assert system_id != image_id
         assert system_id != new_python_id
+
+        # platform change should cause update to everything again
+        image = build_image(
+            tmp_path,
+            file_1,
+            file_2,
+            requirements=requirements_file,
+            system_packages=["rsync"],
+            image=image_name,
+            location=tmp_path,
+            platform="linux/arm64/v8",
+        )
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'file.py'}"),
+            )
+            == "print('hi')"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
+            )
+            == "fake999999999999"
+        )
+        installed = {
+            item["name"]
+            for item in json.loads(
+                run_docker_command(
+                    client, container_id, ("pip", "list", "--format", "json")
+                )
+            )
+        }
+        assert "plz" in installed
+        assert "cloudspy" in installed
+        assert "pytz" in installed
+        assert run_docker_command(
+            client, container_id, ("grep", "^rsync", str(INSTALLED_SYSTEM))
+        ).strip()
+        client.remove_container(container_id, force=True)
+        # all new layers
+        newest_top_id = client.images(image_name)[0]["Id"]
+        assert newest_top_id != new_new_top_id
+        new_new_python_id = client.images(f"{image_name}-python")[0]["Id"]
+        assert new_new_python_id != new_python_id
+        assert new_new_python_id != newest_top_id
+        new_system_id = client.images(f"{image_name}-system")[0]["Id"]
+        assert new_system_id != system_id
+        assert new_system_id != new_new_python_id
 
 
 @requires_docker
