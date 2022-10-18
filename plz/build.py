@@ -48,6 +48,7 @@ def build_zip(
     # environment options
     image: Optional[str] = None,
     tag: Optional[str] = None,
+    platform: Optional[str] = None,
     python_version: str = DEFAULT_PYTHON,
     location: Optional[Path] = None,
     # upload options
@@ -144,6 +145,7 @@ def build_zip(
                 image=image,
                 tag=tag,
                 location=location,
+                platform=platform,
                 python_version=python_version,
                 rebuild=rebuild,
                 freeze=freeze,
@@ -278,6 +280,7 @@ def build_image(
     # environment options
     image: Optional[str] = None,
     tag: Optional[str] = None,
+    platform: Optional[str] = None,
     python_version: str = DEFAULT_PYTHON,
     location: Optional[Path] = None,
     # upload options
@@ -353,6 +356,9 @@ def build_image(
         python_image = f"{image}-python:{tag}"
         lambda_image = f"{image}:{tag}"
 
+    if platform is None:
+        platform = docker.PLATFORM
+
     if python_version > MAX_PYTHON_VERSION:
         logging.warning(
             "Python version (%s) "
@@ -409,7 +415,12 @@ def build_image(
         for path in constraints
     ]
 
-    rebuild_system = rebuild or info.get("system") != system_packages
+    rebuild_system = (
+        rebuild
+        or info.get("system") != system_packages
+        or info.get("platform") != platform
+        or info.get("python-version") != python_version
+    )
     rebuild_python = (
         rebuild_system
         or info.get("python", {}) != python_hashes
@@ -420,6 +431,8 @@ def build_image(
     docker.verify_running()
 
     try:
+        info["platform"] = platform
+        info["python-version"] = python_version
         info["system"] = system_packages
         info["python"] = python_hashes
         info["constraint"] = constraint_hashes
@@ -444,7 +457,10 @@ def build_image(
                 docker.delete_image(system_image)
 
             system_id = docker.build_image(
-                system_image, system_docker_file, location=location
+                system_image,
+                system_docker_file,
+                location=location,
+                platform=platform,
             )
             python_id = lambda_id = None
 
@@ -482,6 +498,7 @@ def build_image(
                     pipconf=pipconf,
                     ssh=True,
                     location=location,
+                    platform=platform,
                 )
             else:
                 docker.tag(system_image, python_image)
@@ -494,10 +511,15 @@ def build_image(
             if relative_files:
                 lambda_docker_file = directory / "DockerFile"
                 docker.build_lambda_docker_file(
-                    lambda_docker_file, python_image, relative_files
+                    lambda_docker_file,
+                    python_image,
+                    relative_files,
                 )
                 lambda_id = docker.build_image(
-                    lambda_image, lambda_docker_file, location=location
+                    lambda_image,
+                    lambda_docker_file,
+                    location=location,
+                    platform=platform,
                 )
             else:
                 docker.tag(python_image, lambda_image)

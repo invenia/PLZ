@@ -281,6 +281,7 @@ def build_image(
     location: Optional[Path] = None,
     pipconf: Optional[Path] = None,
     ssh: bool = False,
+    platform: str = PLATFORM,
 ) -> str:
     """
     Create a docker image from a docker file
@@ -295,6 +296,8 @@ def build_image(
     build_command = [
         "docker",
         "build",
+        "--platform",
+        platform,
         "--tag",
         name,
         "--file",
