@@ -242,7 +242,7 @@ def build_zip(
         try:
             with zip_info.open("w") as stream:
                 json.dump(info, stream, sort_keys=True, indent=4)
-        except:
+        except Exception:
             if zip_info.exists():
                 zip_info.unlink()
             raise
