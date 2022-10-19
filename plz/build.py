@@ -262,6 +262,18 @@ def build_zip(
 
         s3 = session.client("s3")
 
+        # see if code bucket exists and generate it if necessary
+        try:
+            # we're going to assume that if we can read to the bucket we can
+            # write to it
+            s3.list_objects_v2(Bucket=bucket, MaxKeys=0)
+        except s3.exceptions.NoSuchBucket:
+            # the bucket probably doesn't exist (bucket names have to be
+            # globally unique. it's possible someone already made a bucket
+            # with this name and we just don't have access)
+            logging.info("creating code bucket %s", bucket)
+            s3.create_bucket(Bucket=bucket)
+
         s3.put_object(Bucket=bucket, Key=key, Body=filepath.read_bytes())
 
         zip_location = key
