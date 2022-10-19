@@ -567,6 +567,7 @@ def build_image(
             directory,
             lambda_image,
             ecr_repository,
+            session=session,
             account=account,
             profile=profile,
             region=region,

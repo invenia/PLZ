@@ -7,6 +7,9 @@ from subprocess import CalledProcessError, check_call, check_output
 from typing import List, Optional, Sequence
 from uuid import uuid4
 
+import boto3
+from  botocore.exceptions import ClientError
+
 
 IMAGE_VERSION = "1.0.0"
 PLATFORM = "linux/amd64"
@@ -353,6 +356,7 @@ def push(
     repository: str,
     *,
     account: str,
+    session: boto3.Session,
     tag: Optional[str] = None,
     profile: Optional[str] = None,
     region: Optional[str] = None,
@@ -360,6 +364,21 @@ def push(
     """
     Push an image to a remote repository
     """
+
+    # create repository as necessary
+    ecr = session.client("ecr")
+    try:
+        results = ecr.describe_repositories(
+            registryId=account, repositoryNames=[repository]
+        )
+    except ClientError as exception:
+        error = exception.response["Error"]
+        if error["Code"] != "RepositoryNotFoundException":
+            raise
+
+        logging.info("Creating repository in account %s: %s", account, repository)
+        ecr.create_repository(registryId=account, repositoryName=repository)
+
     if tag is None:
         tag = uuid4().hex
 
