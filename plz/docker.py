@@ -7,8 +7,8 @@ from subprocess import CalledProcessError, check_call, check_output
 from typing import List, Optional, Sequence
 from uuid import uuid4
 
-import boto3
-from  botocore.exceptions import ClientError
+import boto3  # type: ignore
+from botocore.exceptions import ClientError  # type: ignore
 
 
 IMAGE_VERSION = "1.0.0"
@@ -368,9 +368,7 @@ def push(
     # create repository as necessary
     ecr = session.client("ecr")
     try:
-        results = ecr.describe_repositories(
-            registryId=account, repositoryNames=[repository]
-        )
+        ecr.describe_repositories(registryId=account, repositoryNames=[repository])
     except ClientError as exception:
         error = exception.response["Error"]
         if error["Code"] != "RepositoryNotFoundException":
