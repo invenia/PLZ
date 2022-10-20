@@ -7,14 +7,16 @@ from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from shutil import rmtree
 from typing import Dict, List, Optional, Sequence, Set, Union
+from uuid import uuid4
 from zipfile import ZipFile
 
 import boto3  # type: ignore
+from botocore.exceptions import ClientError  # type: ignore
 
 from plz import docker
 
 
-__all__ = ["build_image", "build_zip"]
+__all__ = ["build_image", "build_zip", "upload_image"]
 
 
 PACKAGE_INFO_FILENAME = "package-info.json"
@@ -297,6 +299,7 @@ def build_image(
     location: Optional[Path] = None,
     # upload options
     ecr_repository: Optional[str] = None,
+    ecr_tag: Optional[str] = None,
     session: Optional[boto3.Session] = None,
     # flags
     rebuild: bool = False,
@@ -325,6 +328,7 @@ def build_image(
     container: What to name the docker container.
     python_version: The version of python to use when building packages.
     ecr_repository: An ECR repository to upload the image to.
+    ecr_tag: What to tag the remote object.
     session: The boto3 session to use when performing S3 operations
     rebuild: Fully rebuild teh image.
     freeze: Generate a freeze file for the package. Can be either
@@ -567,26 +571,95 @@ def build_image(
             raise
 
     if ecr_repository:
-        if session is None:
-            session = boto3.Session()
-
-        profile = session.profile_name
-        region = session.region_name
-        sts = session.client("sts")
-        account = sts.get_caller_identity()["Account"]
-
-        lambda_image = docker.push(
-            directory,
+        lambda_image = upload_image(
             lambda_image,
             ecr_repository,
+            ecr_tag,
+            directory=directory,
             session=session,
-            account=account,
-            profile=profile,
-            region=region,
-            tag=tag,
+            create_repository=True,
         )
 
     return lambda_image
+
+
+def upload_image(
+    local: str,
+    remote: str,
+    tag: Optional[str],
+    *,
+    directory: Optional[Path] = None,
+    session: Optional[boto3.Session] = None,
+    account_id: Optional[str] = None,
+    profile: Optional[str] = None,
+    region: Optional[str] = None,
+    create_repository: bool = True,
+) -> str:
+    """
+    Upload a docker image to ECR.
+
+    Returns the full URI of the uploaded image.
+
+    NOTE: This function has to shell out. Make sure the profile awscli
+    needs to use is command-line accessible.
+
+    local: The local repository (and tag)
+    remote: The name of the remote repository
+    tag: The tag to use when uploading
+    directory: Where to save the bash script this function needs to run.
+        If not supplied, the current working directory will be used.
+    session: Optionally, the boto session to use. If not supplied, the
+        default session will be used.
+    account_id: The ID of the account whos ECR repository to upload to.
+        If not supplied, the session's account will be used.
+    profile: The profile name to use when shelling out.
+    region: The region of the ECR repository to upload to.
+    create_repository: Whether to create the repository if it doesn't
+        yet exist.
+    """
+    if tag is None:
+        tag = uuid4().hex
+
+    if directory is None:
+        directory = Path.cwd()
+
+    if session is None:
+        session = boto3.Session()
+
+    if account_id is None:
+        sts = session.client("sts")
+        account_id = sts.get_caller_identity()["Account"]
+
+    if profile is None:
+        profile = session.profile_name
+
+    if region is None:
+        region = session.region_name
+
+    if create_repository:
+        ecr = session.client("ecr")
+        try:
+            ecr.describe_repositories(registryId=account_id, repositoryNames=[remote])
+        except ClientError as exception:
+            error = exception.response["Error"]
+            if error["Code"] != "RepositoryNotFoundException":
+                raise
+
+            logging.info("Creating repository in account %s: %s", account_id, remote)
+            ecr.create_repository(registryId=account_id, repositoryName=remote)
+
+    repository = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{remote}"
+
+    docker.push(
+        directory,
+        local,
+        repository,
+        tag,
+        profile=profile,
+        region=region,
+    )
+
+    return f"{repository}:{tag}"
 
 
 def zip_package(

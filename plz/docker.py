@@ -5,10 +5,6 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from subprocess import CalledProcessError, check_call, check_output
 from typing import List, Optional, Sequence
-from uuid import uuid4
-
-import boto3  # type: ignore
-from botocore.exceptions import ClientError  # type: ignore
 
 
 IMAGE_VERSION = "1.0.0"
@@ -354,36 +350,15 @@ def push(
     directory: Path,
     image: str,
     repository: str,
+    tag: str,
     *,
-    account: str,
-    session: boto3.Session,
-    tag: Optional[str] = None,
     profile: Optional[str] = None,
     region: Optional[str] = None,
-) -> str:
+):
     """
     Push an image to a remote repository
     """
-
-    # create repository as necessary
-    ecr = session.client("ecr")
-    try:
-        ecr.describe_repositories(registryId=account, repositoryNames=[repository])
-    except ClientError as exception:
-        error = exception.response["Error"]
-        if error["Code"] != "RepositoryNotFoundException":
-            raise
-
-        logging.info("Creating repository in account %s: %s", account, repository)
-        ecr.create_repository(registryId=account, repositoryName=repository)
-
-    if tag is None:
-        tag = uuid4().hex
-
-    repository = f"{account}.dkr.ecr.{region}.amazonaws.com/{repository}"
-    remote = f"{repository}:{tag}"
-
-    script_file = directory / "push.sh"
+    script_file = directory / "push-docker-image.sh"
     with script_file.open("w") as stream:
         if profile:
             stream.write(f"AWS_DEFAULT_PROFILE={profile}\n")
@@ -399,8 +374,6 @@ def push(
             stream.write("docker push $REPO:$TAG\n")
 
     check_call(("bash", str(script_file), image, repository, tag))
-
-    return remote
 
 
 def get_containers(

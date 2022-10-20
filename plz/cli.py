@@ -8,7 +8,11 @@ from typing import Optional, Sequence
 
 import boto3  # type: ignore
 
-from plz.build import DEFAULT_PYTHON, build_image, build_zip
+from plz.build import DEFAULT_PYTHON, build_image, build_zip, upload_image
+
+
+BUILD = {"image", "zip"}
+UPLOAD = {"push"}
 
 
 def parse_args(args: Optional[Sequence[str]] = None):
@@ -27,65 +31,68 @@ def parse_args(args: Optional[Sequence[str]] = None):
     zip_parser = subparsers.add_parser(
         "zip", help="Build a zip file for uploading to S3"
     )
+    push_parser = subparsers.add_parser("push", help="Push a local image to ECR")
 
     for command, subparser in subparsers.choices.items():
-        subparser.add_argument(
-            "files",
-            type=Path,
-            nargs="*",
-            help="Any number of files or directories to include in the package.",
-        )
-        subparser.add_argument(
-            "-r",
-            "--requirements",
-            type=Path,
-            action="append",
-            help=(
-                "Path to a requirements file for the package. "
-                "Can be supplied multiple times."
-            ),
-        )
-        subparser.add_argument(
-            "-c",
-            "--constraints",
-            type=Path,
-            action="append",
-            help=(
-                "Path to a constraint file for the package. "
-                "Can be supplied multiple times."
-            ),
-        )
-        subparser.add_argument(
-            "--pip",
-            type=str,
-            action="append",
-            help="An argument to pass to pip. Can be supplied multiple times.",
-        )
-        subparser.add_argument(
-            "-s",
-            "--system",
-            action="append",
-            default=None,
-            help="A system package to install. Can be supplied multiple times.",
-        )
+        if command in BUILD:
+            subparser.add_argument(
+                "files",
+                type=Path,
+                nargs="*",
+                help="Any number of files or directories to include in the package.",
+            )
+            subparser.add_argument(
+                "-r",
+                "--requirements",
+                type=Path,
+                action="append",
+                help=(
+                    "Path to a requirements file for the package. "
+                    "Can be supplied multiple times."
+                ),
+            )
+            subparser.add_argument(
+                "-c",
+                "--constraints",
+                type=Path,
+                action="append",
+                help=(
+                    "Path to a constraint file for the package. "
+                    "Can be supplied multiple times."
+                ),
+            )
+            subparser.add_argument(
+                "--pip",
+                type=str,
+                action="append",
+                help="An argument to pass to pip. Can be supplied multiple times.",
+            )
+            subparser.add_argument(
+                "-s",
+                "--system",
+                action="append",
+                default=None,
+                help="A system package to install. Can be supplied multiple times.",
+            )
+            subparser.add_argument("-i", "--image", help="What to call the image")
+            subparser.add_argument("-t", "--tag", help="What to tag the image")
+            subparser.add_argument(
+                "-p",
+                "--python-version",
+                default=DEFAULT_PYTHON,
+                help="Version of Python to build with/for (<major>.<minor>)",
+            )
+            subparser.add_argument(
+                "--rebuild", action="store_true", help="rebuild the image"
+            )
+
         subparser.add_argument(
             "--build",
             type=Path,
             default=Path("build"),
             help="Where to put the build directory for the package.",
         )
-        subparser.add_argument("-i", "--image", help="What to call the image")
-        subparser.add_argument("-t", "--tag", help="What to tag the image")
-        subparser.add_argument(
-            "-p",
-            "--python-version",
-            default=DEFAULT_PYTHON,
-            help="Version of Python to build with/for (<major>.<minor>)",
-        )
         subparser.add_argument("--profile", help="The AWS profile to use for uploading")
-        subparser.add_argument(
-            "--rebuild", action="store_true", help="rebuild the image"
-        )
 
         logger_group_parent = subparser.add_argument_group(
             title="logging arguments",
@@ -126,6 +133,17 @@ def parse_args(args: Optional[Sequence[str]] = None):
 
     image_parser.add_argument("--remote", help="The name of the remote ECR repository")
 
+    push_parser.add_argument("local", help="The name of the local image")
+    push_parser.add_argument("local_tag", help="The local image tag")
+    push_parser.add_argument("remote", help="The name of the ECR repository")
+    push_parser.add_argument("--tag", help="How to tag the remote image")
+    push_parser.add_argument(
+        "--account", help="Which AWS account ID (defaults to matching profile)"
+    )
+    push_parser.add_argument(
+        "--region", help="Which AWS region (defaults to matching profile)"
+    )
+
     return parser.parse_args(args)
 
 
@@ -160,7 +178,7 @@ def main(args: Optional[Sequence[str]] = None):
             rebuild=parsed_args.rebuild,
         )
         print(image)
-    else:
+    elif parsed_args.command == "zip":
         package = build_zip(
             parsed_args.build,
             *parsed_args.files,
@@ -179,6 +197,19 @@ def main(args: Optional[Sequence[str]] = None):
             unique_key=parsed_args.unique,
         )
         print(package)
+    elif parsed_args.command == "push":
+        uri = upload_image(
+            f"{parsed_args.local}:{parsed_args.local_tag}",
+            parsed_args.remote,
+            parsed_args.tag,
+            directory=parsed_args.build,
+            session=session,
+            account_id=parsed_args.account,
+            region=parsed_args.region,
+        )
+        print(uri)
+    else:
+        raise NotImplementedError(parsed_args.command)
 
 
 if __name__ == "__main__":
