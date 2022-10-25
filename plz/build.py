@@ -594,6 +594,8 @@ def upload_image(
     profile: Optional[str] = None,
     region: Optional[str] = None,
     create_repository: bool = True,
+    mutable_images: bool = True,
+    scan_images: bool = True,
 ) -> str:
     """
     Upload a docker image to ECR.
@@ -616,6 +618,9 @@ def upload_image(
     region: The region of the ECR repository to upload to.
     create_repository: Whether to create the repository if it doesn't
         yet exist.
+    mutable_images: Whether to create a repository where images can be
+        overwritten. Defaults to true
+    scan_images: Whether to scan images for vulnerabilities on upload
     """
     if tag is None:
         tag = uuid4().hex
@@ -646,7 +651,12 @@ def upload_image(
                 raise
 
             logging.info("Creating repository in account %s: %s", account_id, remote)
-            ecr.create_repository(registryId=account_id, repositoryName=remote)
+            ecr.create_repository(
+                registryId=account_id,
+                repositoryName=remote,
+                imageTagMutability="MUTABLE" if mutable_images else "IMMUTABLE",
+                ImageScanningConfiguration={"scanOnPush": scan_images},
+            )
 
     repository = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{remote}"
 
