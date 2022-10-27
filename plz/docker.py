@@ -239,6 +239,7 @@ def build_lambda_docker_file(
     path: Path,
     base_image: str,
     files: Sequence[Path],
+    directories: Sequence[Path],
 ):
     """
     Build the docker file for the main image
@@ -249,6 +250,12 @@ def build_lambda_docker_file(
         stream.write(f"RUN mkdir -p {WORKING_DIRECTORY}\n")
         for file in files:
             stream.write(f"COPY {file} {WORKING_DIRECTORY}\n")
+
+        for directory in directories:
+            destination = WORKING_DIRECTORY / directory.name
+            stream.write(
+                f"RUN mkdir -p {destination}\nCOPY {directory} {destination}\n"
+            )
 
 
 def get_image(image: str) -> Optional[str]:

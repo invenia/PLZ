@@ -419,9 +419,18 @@ def build_image(
     constraint_hashes = get_file_hashes(constraints)
 
     # all copied files need to be relative to docker location
-    relative_files = [
-        path.relative_to(location) if path.is_absolute() else path for path in files
-    ]
+    relative_files = []
+    relative_directories = []
+    for path in files:
+        is_directory = path.is_dir()
+
+        if path.is_absolute():
+            path = path.relative_to(location)
+
+        if is_directory:
+            relative_directories.append(path)
+        else:
+            relative_files.append(path)
     requirements = [
         path.relative_to(location) if path.is_absolute() else path
         for path in requirements
@@ -530,6 +539,7 @@ def build_image(
                     lambda_docker_file,
                     python_image,
                     relative_files,
+                    relative_directories,
                 )
                 lambda_id = docker.build_image(
                     lambda_image,

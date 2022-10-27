@@ -350,8 +350,14 @@ def test_build_image(tmp_path):
         file_2 = tmp_path / "requirements.txt"
         file_2.write_text("fake999999999999")
 
+        directory = tmp_path / "directory"
+        directory.mkdir()
+
+        file_3 = tmp_path / directory / "hi.txt"
+        file_3.write_text("hello")
+
         image = build_image(
-            tmp_path, file_1, file_2, image=image_name, location=tmp_path
+            tmp_path, file_1, file_2, directory, image=image_name, location=tmp_path
         )
 
         assert image == image_name
@@ -374,6 +380,14 @@ def test_build_image(tmp_path):
                 ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
             )
             == "fake999999999999"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'directory' / 'hi.txt'}"),
+            )
+            == "hello"
         )
         client.remove_container(container_id, force=True)
         # top layer should be different
