@@ -665,7 +665,7 @@ def upload_image(
                 registryId=account_id,
                 repositoryName=remote,
                 imageTagMutability="MUTABLE" if mutable_images else "IMMUTABLE",
-                ImageScanningConfiguration={"scanOnPush": scan_images},
+                imageScanningConfiguration={"scanOnPush": scan_images},
             )
 
     repository = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{remote}"
