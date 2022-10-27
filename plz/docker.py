@@ -368,7 +368,7 @@ def push(
     script_file = directory / "push-docker-image.sh"
     with script_file.open("w") as stream:
         if profile:
-            stream.write(f"AWS_DEFAULT_PROFILE={profile}\n")
+            stream.write(f"export AWS_DEFAULT_PROFILE={profile}\n")
             stream.write("LOCAL=$1\n")
             stream.write("REPO=$2\n")
             stream.write("TAG=$3\n")
