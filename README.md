@@ -88,7 +88,6 @@ Resources:
 
 You can have `build_zip` upload your code for you using the following arguments:
 * `bucket`: The S3 bucket to upload code to.
-  * `build_zip` will not create this bucket for you
 * `key`: The S3 key to use
   * If not supplied, the name of the zip file will be used
 * `session`: A boto session to use to upload the file to S3
