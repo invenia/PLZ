@@ -3,7 +3,7 @@ from os.path import abspath, dirname, join
 from setuptools import find_packages, setup
 
 
-TEST_DEPS = ["coverage", "pytest", "pytest-cov"]
+TEST_DEPS = ["coverage", "docker", "pytest", "pytest-cov"]
 DOCS_DEPS = [
     "sphinx",
     "sphinx-rtd-theme",
@@ -12,10 +12,7 @@ DOCS_DEPS = [
     "sphinxcontrib-runcmd",
 ]
 CHECK_DEPS = ["isort", "flake8", "flake8-quotes", "pep8-naming", "black", "mypy"]
-# Note: temporarily adding six as a dependency because the docker package uses six
-# but does not declare it as part of its requirements
-# https://github.com/docker/docker-py/issues/2842
-REQUIREMENTS = ["docker", "pyyaml", "six"]
+REQUIREMENTS = ["awscli", "boto3"]
 
 EXTRAS = {
     "test": TEST_DEPS,

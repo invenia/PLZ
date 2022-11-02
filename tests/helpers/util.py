@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from functools import wraps
 from hashlib import sha256
 from pathlib import Path
-from typing import Dict, Generator, Optional
+from typing import Dict, Generator, Optional, Sequence
 from uuid import uuid4
 
 import pytest
@@ -125,13 +125,14 @@ def cleanup_image(name: Optional[str] = None) -> Generator[str, None, None]:
     finally:
         client = APIClient()
 
-        for container in client.containers(
-            filters={"ancestor": name}, quiet=True, all=True
-        ):
-            client.remove_container(container["Id"], force=True)
+        for image in (name, f"{name}-python", f"{name}-system"):
+            for container in client.containers(
+                filters={"ancestor": image}, quiet=True, all=True
+            ):
+                client.remove_container(container["Id"], force=True)
 
-        if client.images(name=name):
-            client.remove_image(name)
+            if client.images(name=image):
+                client.remove_image(image)
 
 
 @contextmanager
@@ -166,3 +167,29 @@ def requires_docker(function):
 def hash_file(path: Path) -> str:
     with path.open("rb") as stream:
         return sha256(stream.read()).hexdigest()
+
+
+def run_docker_command(
+    client: APIClient,
+    container_id: str,
+    cmd: Sequence[str],
+    environment: Optional[Sequence[str]] = None,
+) -> str:
+    ex = client.exec_create(container_id, cmd=cmd, environment=environment)
+    result = client.exec_start(ex["Id"], stream=True)
+
+    cmd_output = []
+    for line in result:
+        decoded = line.decode("UTF-8")
+        cmd_output.append(decoded)
+
+    exec_info = client.exec_inspect(ex["Id"])
+
+    if exec_info["ExitCode"]:
+        cmd_output_string = "".join(cmd_output)
+        exception_string = (
+            f"The following error occurred while executing {cmd}:\n{cmd_output_string}"
+        )
+        raise RuntimeError(exception_string)
+
+    return "".join(cmd_output)

@@ -3,18 +3,16 @@ Tests for plz.build
 """
 import json
 import os
-import re
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from zipfile import ZipFile
 
 import docker
-import pytest
 
 from tests.helpers.util import (
-    MockAPIClient,
     cleanup_image,
     hash_file,
     requires_docker,
+    run_docker_command,
     update_json,
 )
 
@@ -29,11 +27,6 @@ from tests.helpers.util import (
 # after the old zip is deleted to be sure probably and that seems overly
 # invasive.
 SKIP_MTIME_CHECKS = os.environ.get("SKIP_MTIME_CHECKS") == "1"
-
-
-@pytest.fixture()
-def mock_api_client(monkeypatch):
-    monkeypatch.setattr(docker, "APIClient", MockAPIClient)
 
 
 def test_zip_package_no_prefix(tmpdir):
@@ -92,392 +85,12 @@ def test_zip_package_with_prefix(tmpdir):
         }
 
 
-@requires_docker
-def test_process_requirements(tmp_path):
-    from plz.build import process_requirements
+def test_build_zip_files_only(tmp_path):
+    from plz.build import PACKAGE_INFO_VERSION, build_zip
 
-    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
-    if ci_build_token:
-        url = (
-            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
-            "/invenia/plz.git"
-        )
-    else:
-        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
-
-    build_path = Path(tmp_path / "build")
-    requirements = tmp_path / "requirements.txt"
-    system_requirements = tmp_path / "yum.yaml"
-
-    with requirements.open("w") as stream:
-        stream.write("pyyaml==5.3.1")
-    with system_requirements.open("w") as stream:
-        stream.write("version: 0.1.0\nfiletypes:\n  - .so\npackages:\n  - libpng")
-
-    build = tmp_path / "build"
-
-    with cleanup_image() as image_name:
-        container_name = f"{image_name}-container"
-
-        process_requirements(
-            (requirements,),
-            system_requirements,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-        )
-
-        # Image and container should still exist. the container should be stopped
-        client = docker.APIClient()
-        assert 1 == len(client.images(name=image_name, quiet=True))
-        assert 0 == len(
-            client.containers(
-                filters={"ancestor": image_name, "name": container_name}, quiet=True
-            )
-        )
-        assert 1 == len(
-            client.containers(
-                filters={"ancestor": image_name, "name": container_name},
-                all=True,
-                quiet=True,
-            )
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert info["python-version"] == "3.7"
-        assert (
-            info["container-id"]
-            == client.containers(
-                filters={"ancestor": image_name, "name": container_name},
-                all=True,
-                quiet=True,
-            )[0]["Id"]
-        )
-        assert "5.3.1" in info["python-packages"]["pyyaml"]
-        assert "libpng" in info["system-packages"]
-        assert 0 < len(info["system-packages"]["libpng"]["files"])
-
-        assert build_path.exists()
-        assert (build_path / "python" / "yaml").exists()
-        for file in info["system-packages"]["libpng"]["files"]:
-            path = PurePosixPath(file)
-            assert (build_path / "system" / path.name).exists()
-
-        # removing all dependency files should remove all dependencies
-        process_requirements(
-            (),
-            None,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {} == info["python-packages"]
-        assert {} == info["system-packages"]
-        assert not (build_path / "python").exists()
-        assert not (build_path / "system").exists()
-
-        # this constraint file should be ignored
-        constraints = build / "constraints"
-        constraints.mkdir(exist_ok=True)
-        with (constraints / "file.txt").open("w") as stream:
-            stream.write("pyyaml==5.3.0")
-
-        # new dependencies
-        with requirements.open("w") as stream:
-            stream.write("pyyaml<5.3.2\nxlrd!=1.2.0,<2.0,>=1.0.1")
-        with system_requirements.open("w") as stream:
-            stream.write(
-                "version: 0.1.0\n"
-                "filetypes:\n"
-                "  - .so\n"
-                "packages:\n"
-                "  - libpng\n"
-                "  - libwebp\n"
-            )
-
-        process_requirements(
-            (requirements,),
-            system_requirements,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-            reinstall_system=True,
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"pyyaml", "xlrd"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["pyyaml"] == "5.3.1"
-        assert info["python-packages"]["xlrd"] == "1.1.0"
-        assert "libpng" in info["system-packages"]
-        assert "libwebp" in info["system-packages"]
-        assert (build_path / "python" / "yaml").exists()
-        assert (build_path / "python" / "xlrd").exists()
-        for package in ("libpng", "libwebp"):
-            for file in info["system-packages"][package]["files"]:
-                path = PurePosixPath(file)
-                assert (build_path / "system" / path.name).exists()
-
-        # deleting dependencies
-        libpng_files = info["system-packages"]["libpng"]["files"]
-        with requirements.open("w") as stream:
-            stream.write(
-                "# comments should be allowed in files\n"
-                "xlrd!=1.2.0,<2.0,>=1.0.1\n"
-                "\n\n\n\n"
-                "# blank lines too!"
-            )
-        with system_requirements.open("w") as stream:
-            stream.write(
-                "version: 0.1.0\n"
-                "filetypes:\n"
-                "  - .so\n"
-                "packages:\n"
-                "  - libpng\n"
-                "  - libwebp\n"
-                "skip:\n"
-                "  - libpng"
-            )
-
-        process_requirements(
-            (requirements,),
-            system_requirements,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"pyyaml", "xlrd"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["pyyaml"] == "5.3.1"
-        assert info["python-packages"]["xlrd"] == "1.1.0"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert (build_path / "python" / "yaml").exists()
-        assert (build_path / "python" / "xlrd").exists()
-        for file in info["system-packages"]["libwebp"]["files"]:
-            path = PurePosixPath(file)
-            assert (build_path / "system" / path.name).exists()
-        for file in libpng_files:
-            path = PurePosixPath(file)
-            assert not (build_path / "system" / path.name).exists()
-
-        # rebuilding shouldn't affect python dependencies
-        filepath = info["system-packages"]["libwebp"]["files"][0]
-        with system_requirements.open("w") as stream:
-            stream.write(
-                "version: 0.1.0\n"
-                "filetypes:\n"
-                "  - .so\n"
-                "packages:\n"
-                f"  libwebp: {filepath}"
-            )
-
-        process_requirements(
-            (requirements,),
-            system_requirements,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-            rebuild_image=True,
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"xlrd"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["xlrd"] == "1.1.0"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert [filepath] == info["system-packages"]["libwebp"]["files"]
-        assert (build_path / "python" / "yaml").exists()
-        assert (build_path / "python" / "xlrd").exists()
-        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
-
-        # private dependency ( and constraint file)
-        with requirements.open("w") as stream:
-            stream.write(f"xlrd\n{url}@1.1.2")
-
-        constraint = tmp_path / "constraint.txt"
-        with constraint.open("w") as stream:
-            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1")
-
-        process_requirements(
-            (requirements,),
-            system_requirements,
-            build,
-            image_name,
-            container_name,
-            python_version="3.7",
-            no_secrets=True,
-            reinstall_python=True,
-            pip_args={"plz": ["--no-use-pep517"]},
-            freeze=True,
-            constraints=[constraint],
-        )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"plz"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["plz"] == "1.1.2"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert [filepath] == info["system-packages"]["libwebp"]["files"]
-        assert (build_path / "python" / "plz").exists()
-        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
-
-        freeze = build / "frozen-requirements.txt"
-        # Note: temporarily removing six from the expected output.
-        # The docker package should have six as a dependency (it uses six),
-        # but it currently is not declared in docker's requirements
-        # https://github.com/docker/docker-py/issues/2842
-        expected = [
-            "certifi",
-            "chardet",
-            "docker",
-            "idna",
-            "plz",
-            "PyYAML",
-            "requests",
-            "urllib3",
-            "websocket-client",
-            "xlrd",
-        ]
-        with freeze.open("r") as stream:
-            for line in stream.read().splitlines():
-                if expected[0] == "plz":
-                    assert line == "plz==1.1.2"
-                elif expected[0] == "xlrd":
-                    assert line == "xlrd==1.1.0"
-                else:
-                    match = re.search(r"^([\w_-]+)==\d+\.\d+(?:\.\d+)?$", line)
-                    assert match.group(1) == expected[0]
-
-                expected.pop(0)
-
-        assert expected == []
-
-        # invalid image
-        with pytest.raises(ValueError):
-            process_requirements(
-                (requirements,),
-                system_requirements,
-                build,
-                image_name,
-                container_name,
-                python_version="3.8",
-                no_secrets=True,
-            )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"plz"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["plz"] == "1.1.2"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert [filepath] == info["system-packages"]["libwebp"]["files"]
-        assert (build_path / "python" / "plz").exists()
-        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
-
-        # invalid system_requirements
-        invalid_system_requirements = tmp_path / "invalid.yaml"
-        with invalid_system_requirements.open("w") as stream:
-            stream.write(
-                "version: 0.2.0\n"
-                "filetypes:\n"
-                "  - .so\n"
-                "packages:\n"
-                f"  libwebp: {filepath}"
-            )
-
-        with pytest.raises(ValueError):
-            process_requirements(
-                (requirements,),
-                invalid_system_requirements,
-                build,
-                image_name,
-                container_name,
-                python_version="3.7",
-                no_secrets=True,
-            )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"plz"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["plz"] == "1.1.2"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert [filepath] == info["system-packages"]["libwebp"]["files"]
-        assert (build_path / "python" / "plz").exists()
-        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
-
-        # non-existent requirement
-        with requirements.open("w") as stream:
-            stream.write(f"{url}@0.0.0")
-
-        with pytest.raises(Exception):
-            process_requirements(
-                (requirements,),
-                system_requirements,
-                build,
-                image_name,
-                container_name,
-                python_version="3.7",
-                no_secrets=True,
-            )
-
-        build_info = build_path / "build-info.json"
-        assert build_info.exists()
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert {"plz"} <= set(info["python-packages"].keys())
-        assert info["python-packages"]["plz"] == "1.1.2"
-        assert {"libwebp"} == set(info["system-packages"].keys())
-        assert [filepath] == info["system-packages"]["libwebp"]["files"]
-        assert (build_path / "python" / "plz").exists()
-        assert (build_path / "system" / PurePosixPath(filepath).name).exists()
-
-
-def test_build_package_only_files(mock_api_client, tmp_path):
-    from plz.build import build_package
-
-    build_path = Path(tmp_path / "build")
-    files_path = Path(tmp_path / "files")
-    package_info = build_path / "package-info.json"
+    build_path = tmp_path / "build"
+    files_path = tmp_path / "files"
+    zip_info = build_path / "zip-info.json"
 
     files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
 
@@ -489,20 +102,21 @@ def test_build_package_only_files(mock_api_client, tmp_path):
         else:
             path.mkdir()
 
-    zipfile = build_package(build_path, *files, python_version="3.7")
+    zipfile = build_zip(build_path, *files)
     assert zipfile == build_path / "package.zip"
 
     file_hashes = {
         str(path.absolute()): hash_file(path) for path in files if path.is_file()
     }
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] is None
+    assert info["zip"] == hash_file(zipfile)
 
     with ZipFile(zipfile, "r") as z:
         assert set(z.namelist()) == {"file1.py", "file2.py"}
@@ -510,14 +124,12 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     # rerunning should not force a rezip
     mtime = zipfile.stat().st_mtime
     contents = hash_file(zipfile)
-    assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert zipfile == build_zip(build_path, *files)
     assert hash_file(zipfile) == contents
     assert zipfile.stat().st_mtime == mtime
 
-    # rezip should force a rezip
-    assert zipfile == build_package(
-        build_path, *files, python_version="3.7", rezip=True
-    )
+    # rebuild should force a rezip
+    assert zipfile == build_zip(build_path, *files, rebuild=True)
     assert hash_file(zipfile) == contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
@@ -534,18 +146,17 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     mtime = zipfile.stat().st_mtime
     contents = hash_file(zipfile)
 
-    assert zipfile == build_package(build_path, *files, python_version="3.7")
+    assert zipfile == build_zip(build_path, *files)
     assert hash_file(zipfile) != contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info["version"] != "fake"
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] is None
 
     with ZipFile(zipfile, "r") as z:
@@ -557,19 +168,17 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     # adding a prefix should force a rezip
     mtime = zipfile.stat().st_mtime
     contents = hash_file(zipfile)
-    assert zipfile == build_package(
-        build_path, *files, zipped_prefix="lambda", python_version="3.7"
-    )
+    assert zipfile == build_zip(build_path, *files, zipped_prefix="lambda")
     assert hash_file(zipfile) != contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
@@ -586,19 +195,17 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     contents = hash_file(zipfile)
     mtime = zipfile.stat().st_mtime
 
-    assert zipfile == build_package(
-        build_path, *files, zipped_prefix="lambda", python_version="3.7"
-    )
+    assert zipfile == build_zip(build_path, *files, zipped_prefix="lambda")
     assert hash_file(zipfile) != contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
@@ -616,19 +223,17 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     mtime = zipfile.stat().st_mtime
     contents = hash_file(zipfile)
 
-    assert zipfile == build_package(
-        build_path, *files, zipped_prefix="lambda", python_version="3.7"
-    )
+    assert zipfile == build_zip(build_path, *files, zipped_prefix="lambda")
     assert hash_file(zipfile) != contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
@@ -642,19 +247,17 @@ def test_build_package_only_files(mock_api_client, tmp_path):
 
     mtime = zipfile.stat().st_mtime
 
-    assert zipfile == build_package(
-        build_path, *files, zipped_prefix="lambda", python_version="3.7"
-    )
+    assert zipfile == build_zip(build_path, *files, zipped_prefix="lambda")
     assert hash_file(zipfile) == contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
@@ -663,272 +266,396 @@ def test_build_package_only_files(mock_api_client, tmp_path):
     # changing python shouldn't affect file-only zips
     mtime = zipfile.stat().st_mtime
 
-    assert zipfile == build_package(
+    assert zipfile == build_zip(
         build_path, *files, zipped_prefix="lambda", python_version="2.7"
     )
     assert hash_file(zipfile) == contents
     assert zipfile.stat().st_mtime == mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
     # invalid package info version should force a rezip
-    with update_json(package_info) as info:
+    with update_json(zip_info) as info:
         info["version"] = "fake"
 
     mtime = zipfile.stat().st_mtime
 
-    assert zipfile == build_package(
-        build_path, *files, zipped_prefix="lambda", python_version="3.7"
-    )
+    assert zipfile == build_zip(build_path, *files, zipped_prefix="lambda")
     assert hash_file(zipfile) == contents
     if not SKIP_MTIME_CHECKS:
         assert zipfile.stat().st_mtime != mtime
 
-    with package_info.open("r") as stream:
+    with zip_info.open("r") as stream:
         info = json.load(stream)
 
-    assert info.get("system", {}) == {}
-    assert info.get("python", {}) == {}
+    assert info["version"] == PACKAGE_INFO_VERSION
     assert info["files"] == file_hashes
+    assert info["image_id"] is None
     assert info["prefix"] == "lambda"
 
     with ZipFile(zipfile, "r") as z:
         assert set(z.namelist()) == {"lambda/file1.py", "lambda/file2.py"}
 
-    # different file hierarch should for a rezip
-    (files_path / "new.py").unlink()  # need to make directory the same
-    mtime = zipfile.stat().st_mtime
 
-    assert zipfile == build_package(
-        build_path, files_path, zipped_prefix="lambda", python_version="3.7"
-    )
-    if not SKIP_MTIME_CHECKS:
-        assert zipfile.stat().st_mtime != mtime
+@requires_docker
+def test_build_image(tmp_path):
+    from plz.build import DEFAULT_PYTHON, build_image
+    from plz.docker import INSTALLED_SYSTEM, WORKING_DIRECTORY
 
-    with ZipFile(zipfile, "r") as z:
-        assert set(z.namelist()) == {"lambda/files/file1.py", "lambda/files/file2.py"}
+    if os.environ.get("SSH_AUTH_SOCK"):
+        ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+        if ci_build_token:
+            url = (
+                f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+                "/invenia/plz.git"
+            )
+        else:
+            url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
+    else:
+        url = "plz"  # fall back to pypi
+
+    client = docker.APIClient()
+
+    with cleanup_image() as image_name:
+        # empty image
+        image = build_image(tmp_path, image=image_name)
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert run_docker_command(
+            client, container_id, ("python", "--version")
+        ).startswith(f"Python {DEFAULT_PYTHON}")
+        client.remove_container(container_id, force=True)
+        # all 3 layers should be the same
+        image_id = client.images(image_name)[0]["Id"]
+        assert client.images(f"{image_name}-system")[0]["Id"] == image_id
+        assert client.images(f"{image_name}-python")[0]["Id"] == image_id
+
+        # add file
+        file_1 = tmp_path / "file.py"
+        file_1.write_text("print('hi')")
+
+        file_2 = tmp_path / "requirements.txt"
+        file_2.write_text("fake999999999999")
+
+        directory = tmp_path / "directory"
+        directory.mkdir()
+
+        file_3 = tmp_path / directory / "hi.txt"
+        file_3.write_text("hello")
+
+        image = build_image(
+            tmp_path, file_1, file_2, directory, image=image_name, location=tmp_path
+        )
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'file.py'}"),
+            )
+            == "print('hi')"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
+            )
+            == "fake999999999999"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'directory' / 'hi.txt'}"),
+            )
+            == "hello"
+        )
+        client.remove_container(container_id, force=True)
+        # top layer should be different
+        top_id = client.images(image_name)[0]["Id"]
+        assert top_id != image_id
+        assert client.images(f"{image_name}-system")[0]["Id"] == image_id
+        assert client.images(f"{image_name}-python")[0]["Id"] == image_id
+
+        requirements_file = tmp_path / "requirements" / "requirements.txt"
+        (tmp_path / "requirements").mkdir()
+
+        with requirements_file.open("w") as stream:
+            stream.write("\n".join((url, "cloudspy", "pytz")))
+
+        image = build_image(
+            tmp_path,
+            file_1,
+            file_2,
+            requirements=requirements_file,
+            image=image_name,
+            location=tmp_path,
+        )
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'file.py'}"),
+            )
+            == "print('hi')"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
+            )
+            == "fake999999999999"
+        )
+        installed = {
+            item["name"]
+            for item in json.loads(
+                run_docker_command(
+                    client, container_id, ("pip", "list", "--format", "json")
+                )
+            )
+        }
+        assert "plz" in installed
+        assert "cloudspy" in installed
+        assert "pytz" in installed
+        client.remove_container(container_id, force=True)
+        # top and layer should be different
+        new_top_id = client.images(image_name)[0]["Id"]
+        assert new_top_id != top_id
+        python_id = client.images(f"{image_name}-python")[0]["Id"]
+        assert python_id != new_top_id
+        assert python_id != image_id
+        assert client.images(f"{image_name}-system")[0]["Id"] == image_id
+
+        image = build_image(
+            tmp_path,
+            file_1,
+            file_2,
+            requirements=requirements_file,
+            system_packages=["rsync"],
+            image=image_name,
+            location=tmp_path,
+        )
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'file.py'}"),
+            )
+            == "print('hi')"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
+            )
+            == "fake999999999999"
+        )
+        installed = {
+            item["name"]
+            for item in json.loads(
+                run_docker_command(
+                    client, container_id, ("pip", "list", "--format", "json")
+                )
+            )
+        }
+        assert "plz" in installed
+        assert "cloudspy" in installed
+        assert "pytz" in installed
+        assert run_docker_command(
+            client, container_id, ("grep", "^rsync", str(INSTALLED_SYSTEM))
+        ).strip()
+        client.remove_container(container_id, force=True)
+        # all new layers
+        new_new_top_id = client.images(image_name)[0]["Id"]
+        assert new_new_top_id != new_top_id
+        new_python_id = client.images(f"{image_name}-python")[0]["Id"]
+        assert new_python_id != python_id
+        assert new_python_id != new_new_top_id
+        system_id = client.images(f"{image_name}-system")[0]["Id"]
+        assert system_id != image_id
+        assert system_id != new_python_id
+
+        # platform change should cause update to everything again
+        image = build_image(
+            tmp_path,
+            file_1,
+            file_2,
+            requirements=requirements_file,
+            system_packages=["rsync"],
+            image=image_name,
+            location=tmp_path,
+            platform="linux/arm64/v8",
+        )
+
+        assert image == image_name
+
+        info = client.create_container(image_name, "/bin/bash", detach=True, tty=True)
+        container_id = info["Id"]
+        client.start(container_id)
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'file.py'}"),
+            )
+            == "print('hi')"
+        )
+        assert (
+            run_docker_command(
+                client,
+                container_id,
+                ("cat", f"{WORKING_DIRECTORY / 'requirements.txt'}"),
+            )
+            == "fake999999999999"
+        )
+        installed = {
+            item["name"]
+            for item in json.loads(
+                run_docker_command(
+                    client, container_id, ("pip", "list", "--format", "json")
+                )
+            )
+        }
+        assert "plz" in installed
+        assert "cloudspy" in installed
+        assert "pytz" in installed
+        assert run_docker_command(
+            client, container_id, ("grep", "^rsync", str(INSTALLED_SYSTEM))
+        ).strip()
+        client.remove_container(container_id, force=True)
+        # all new layers
+        newest_top_id = client.images(image_name)[0]["Id"]
+        assert newest_top_id != new_new_top_id
+        new_new_python_id = client.images(f"{image_name}-python")[0]["Id"]
+        assert new_new_python_id != new_python_id
+        assert new_new_python_id != newest_top_id
+        new_system_id = client.images(f"{image_name}-system")[0]["Id"]
+        assert new_system_id != system_id
+        assert new_system_id != new_new_python_id
 
 
 @requires_docker
-def test_build_package(tmp_path):
-    from plz.build import build_package
+def test_build_zip(tmp_path):
+    from plz.build import build_zip
 
-    ci_build_token = os.environ.get("CI_BUILD_TOKEN")
-    if ci_build_token:
-        url = (
-            f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
-            "/invenia/plz.git"
-        )
+    if os.environ.get("SSH_AUTH_SOCK"):
+        ci_build_token = os.environ.get("CI_BUILD_TOKEN")
+        if ci_build_token:
+            url = (
+                f"git+https://gitlab-ci-token:{ci_build_token}@gitlab.invenia.ca"
+                "/invenia/plz.git"
+            )
+        else:
+            url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
     else:
-        url = "git+ssh://git@gitlab.invenia.ca/invenia/plz.git"
+        url = "plz"  # fall back to pypi
+
+    build_path = tmp_path / "build"
+    files_path = tmp_path / "files"
+
+    files = [files_path / "file1.py", files_path / "file2.py", files_path / "testpath"]
+
+    files_path.mkdir()
+    for path in files:
+        if path.suffix == ".py":
+            with path.open("w") as stream:
+                stream.write("# test")
+        else:
+            path.mkdir()
+
+    requirements_1 = tmp_path / "requirements.txt"
+    requirements_1.write_text(url)
+    requirements_2 = tmp_path / "requirements-1.txt"
+    requirements_2.write_text("cloudspy\npytz")
+    requirements = [requirements_1, requirements_2]
 
     with cleanup_image() as image_name:
-        build_path = Path(tmp_path / "build")
-        files_path = Path(tmp_path / "files")
-        package_info = build_path / "package-info.json"
-
-        files = [
-            files_path / "file1.py",
-            files_path / "file2.py",
-            files_path / "testpath",
-        ]
-
-        files_path.mkdir()
-        for path in files:
-            if path.suffix == ".py":
-                with path.open("w") as stream:
-                    stream.write("print('hi')")
-            else:
-                path.mkdir()
-
-        requirements = tmp_path / "requirements.txt"
-        with requirements.open("w") as stream:
-            stream.write(f"pyyaml\n{url}@1.1.2")
-
-        zipfile = build_package(
+        zipfile = build_zip(
             build_path,
             *files,
-            image_name=image_name,
             requirements=requirements,
-            python_version="3.7",
-            no_secrets=True,
-            pip_args={"plz": ["--no-use-pep517"]},
+            location=tmp_path,
+            image=image_name,
         )
         assert zipfile == build_path / "package.zip"
 
-        file_hashes = {
-            str(path.absolute()): hash_file(path) for path in files if path.is_file()
-        }
-        requirements_hashes = {str(requirements.absolute()): hash_file(requirements)}
-
-        with package_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert info.get("system", {}) == {}
-        assert info.get("python", {}) == requirements_hashes
-        assert info["files"] == file_hashes
-        assert info["prefix"] is None
-
         with ZipFile(zipfile, "r") as z:
-            assert set(z.namelist()) >= {
-                "file1.py",
-                "file2.py",
-                "yaml/__init__.py",
-                "plz/__init__.py",
-            }
+            all_files = set(z.namelist())
 
-        # rerun shouldn't touch zip
-        mtime = zipfile.stat().st_mtime
-        zipfile = build_package(
+        assert "file1.py" in all_files
+        assert "file2.py" in all_files
+        assert "plz/__init__.py" in all_files
+        assert "cloudspy/__init__.py" in all_files
+        assert "pytz/__init__.py" in all_files
+        assert "boto3/__init__.py" not in all_files
+
+        # remove requirement
+        zipfile = build_zip(
             build_path,
             *files,
-            image_name=image_name,
-            requirements=requirements,
-            python_version="3.7",
-            no_secrets=True,
-            pip_args={"plz": ["--no-use-pep517"]},
+            requirements=requirements_2,
+            location=tmp_path,
+            image=image_name,
         )
         assert zipfile == build_path / "package.zip"
-        assert zipfile.stat().st_mtime == mtime
-        with ZipFile(zipfile, "r") as z:
-            assert set(z.namelist()) >= {
-                "file1.py",
-                "file2.py",
-                "yaml/__init__.py",
-                "plz/__init__.py",
-            }
 
-        # force with a different python
-        mtime = zipfile.stat().st_mtime
-        zipfile = build_package(
+        with ZipFile(zipfile, "r") as z:
+            all_files = set(z.namelist())
+
+        assert "file1.py" in all_files
+        assert "file2.py" in all_files
+        assert "plz/__init__.py" not in all_files
+        assert "cloudspy/__init__.py" in all_files
+        assert "pytz/__init__.py" in all_files
+        assert "boto3/__init__.py" not in all_files
+
+        zipfile = build_zip(
             build_path,
             *files,
-            image_name=image_name,
-            requirements=requirements,
-            python_version="3.8",
-            no_secrets=True,
-            force=True,
-            pip_args={"plz": ["--no-use-pep517"]},
+            location=tmp_path,
+            image=image_name,
         )
         assert zipfile == build_path / "package.zip"
-        assert zipfile.stat().st_mtime != mtime
+
         with ZipFile(zipfile, "r") as z:
-            assert set(z.namelist()) >= {
-                "file1.py",
-                "file2.py",
-                "yaml/__init__.py",
-                "plz/__init__.py",
-            }
+            all_files = set(z.namelist())
 
-        # non-existent requirement
-        with requirements.open("w") as stream:
-            stream.write(f"{url}@0.0.0")
-
-        with pytest.raises(Exception):
-            build_package(
-                build_path,
-                *files,
-                image_name=image_name,
-                requirements=requirements,
-                python_version="3.7",
-                no_secrets=True,
-            )
-
-        with package_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert info.get("system", {}) == {}
-        assert info.get("python", {}) == {}
-        assert info["files"] == {}
-        assert info["prefix"] is None
-        assert info["zip"] is None
-        assert not zipfile.exists()
-
-        # freeze and constraints
-        with requirements.open("w") as stream:
-            stream.write("xlrd")
-
-        constraint = tmp_path / "constraints.txt"
-        with constraint.open("w") as stream:
-            stream.write("xlrd!=1.2.0,<2.0,>=1.0.1\nrequests==1.1.1")
-
-        freeze = tmp_path / "frozen.txt"
-
-        zipfile = build_package(
-            build_path,
-            *files,
-            image_name=image_name,
-            requirements=requirements,
-            python_version="3.7",
-            no_secrets=True,
-            force=True,
-            constraints=constraint,
-            freeze=freeze,
-            rebuild_image=True,
-        )
-
-        build_info = build_path / "build-info.json"
-        with build_info.open("r") as stream:
-            info = json.load(stream)
-
-        assert info.get("system-packages", {}) == {}
-        assert info.get("python-packages", {}) == {"xlrd": "1.1.0"}
-
-        assert freeze.exists()
-        with freeze.open("r") as stream:
-            assert stream.read() == "xlrd==1.1.0\n"
-
-        # real-world test. what datafeeds needs
-        with requirements.open("w") as stream:
-            stream.write("pygrib")
-
-        system_requirements = tmp_path / "system.yaml"
-        with system_requirements.open("w") as stream:
-            stream.write(
-                "version: 0.1.0\n"
-                "filetypes:\n"
-                "  - .so\n"
-                "packages:\n"
-                "  - libgomp\n"
-                "  - grib_api-devel"
-            )
-
-        zipfile = build_package(
-            build_path,
-            *files,
-            image_name=image_name,
-            requirements=requirements,
-            system_requirements=system_requirements,
-            python_version="3.8",
-            no_secrets=True,
-            force=True,
-        )
-
-        directory = tmp_path / "package"
-        ZipFile(zipfile).extractall(directory)
-
-        for file in files:
-            if file.is_file():
-                assert (directory / file.relative_to(files_path)).exists()
-
-        assert (directory / "eccodes").exists()
-
-        for library in ("libgomp", "libjpeg", "libgfortran", "libeccodes"):
-            so_file = None
-            for path in directory.iterdir():
-                if path.name.startswith(library) and path.suffix.startswith(".so"):
-                    so_file = path
-                    break
-            else:
-                print(library)
-
-            assert so_file is not None
+        assert "file1.py" in all_files
+        assert "file2.py" in all_files
+        assert "plz/__init__.py" not in all_files
+        assert "cloudspy/__init__.py" not in all_files
+        assert "pytz/__init__.py" not in all_files
+        assert "boto3/__init__.py" not in all_files
