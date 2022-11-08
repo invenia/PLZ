@@ -128,6 +128,10 @@ def build_zip(
 
         file_hashes = get_file_hashes(files)
 
+        if info.get("python-version") != python_version:
+            rebuild = True
+        info["python-version"] = python_version
+
         package_directory = directory / "python"
         if not requirements:
             if package_directory.exists():
