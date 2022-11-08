@@ -28,7 +28,7 @@ INSTALLED_SYSTEM = HOME_DIRECTORY / "installed-system"
 MAX_TAG_LENGTH = 128
 
 
-def name_image(base: str = None) -> str:
+def name_image(base: Optional[str] = None) -> str:
     """
     Create a valid name for an image. All image names will have plz-
     prepended to them.
