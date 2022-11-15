@@ -52,9 +52,13 @@ def name_image(base: Optional[str] = None) -> str:
         elif symbol == "/" and parts[-1]:
             parts.append([])
 
-    return "".join("/".join(["".join(part).rstrip("._-") for part in parts]))[
-        :MAX_TAG_LENGTH
-    ].rstrip("._/-")
+    return (
+        "".join("/".join(["".join(part).rstrip("._-") for part in parts]))[
+            :MAX_TAG_LENGTH
+        ]
+        .rstrip("._/-")
+        .lower()
+    )
 
 
 def validate_image_name(name: str):
