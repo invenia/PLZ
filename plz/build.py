@@ -423,7 +423,7 @@ def build_image(
         info = {"version": PACKAGE_INFO_VERSION}
 
     if entrypoint:
-        files_for_hashing = [*files, entrypoint]
+        files_for_hashing = tuple([*files, entrypoint])
     else:
         files_for_hashing = files
 
