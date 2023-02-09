@@ -244,6 +244,8 @@ def build_lambda_docker_file(
     base_image: str,
     files: Sequence[Path],
     directories: Sequence[Path],
+    entrypoint: Optional[Path] = None,
+    ports: Optional[List[str]] = None,
 ):
     """
     Build the docker file for the main image
@@ -260,6 +262,14 @@ def build_lambda_docker_file(
             stream.write(
                 f"RUN mkdir -p {destination}\nCOPY {directory} {destination}\n"
             )
+
+        if entrypoint:
+            stream.write(f"COPY {entrypoint} {WORKING_DIRECTORY}\n")
+            stream.write(f"RUN chmod +x {WORKING_DIRECTORY / entrypoint.name}\n")
+            stream.write(f'ENTRYPOINT [ "{WORKING_DIRECTORY / entrypoint.name}" ]\n')
+
+        if ports:
+            stream.write(f"EXPOSE {' '.join(ports)}")
 
 
 def get_image(image: str) -> Optional[str]:
