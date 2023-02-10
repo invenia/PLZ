@@ -435,10 +435,13 @@ def build_image(
     relative_files = []
     relative_directories = []
     for path in files:
+        # we need to do this check before we convert from an absolute path
+        is_directory = path.is_dir()
+
         if path.is_absolute():
             path = path.relative_to(location)
 
-        if path.is_dir():
+        if is_directory:
             relative_directories.append(path)
         else:
             relative_files.append(path)
