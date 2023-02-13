@@ -296,6 +296,8 @@ def build_image(
     pip_args: Optional[List[str]] = None,
     system_packages: Optional[List[str]] = None,
     # environment options
+    entrypoint: Optional[Path] = None,
+    ports: Optional[List[str]] = None,
     image: Optional[str] = None,
     tag: Optional[str] = None,
     platform: Optional[str] = None,
@@ -325,6 +327,8 @@ def build_image(
         files.
     pip_args: a list of arguments to pass to pip.
     system_packages: A list of packages to install.
+    entrypoint: An optional custom entrypoint for the docker image
+    ports: An optional list of ports to expose
     image: What to name the docker image. Will also create additional
         layers <image>-system and <image>-python. If unsupplied, the
         name will be based on the current working directory's name.
@@ -418,7 +422,12 @@ def build_image(
     else:
         info = {"version": PACKAGE_INFO_VERSION}
 
-    file_hashes = get_file_hashes(files)
+    if entrypoint:
+        files_for_hashing = tuple([*files, entrypoint])
+    else:
+        files_for_hashing = files
+
+    file_hashes = get_file_hashes(files_for_hashing)
     python_hashes = get_file_hashes(requirements)
     constraint_hashes = get_file_hashes(constraints)
 
@@ -426,6 +435,7 @@ def build_image(
     relative_files = []
     relative_directories = []
     for path in files:
+        # we need to do this check before we convert from an absolute path
         is_directory = path.is_dir()
 
         if path.is_absolute():
@@ -435,6 +445,11 @@ def build_image(
             relative_directories.append(path)
         else:
             relative_files.append(path)
+
+    if entrypoint:
+        if entrypoint.is_absolute():
+            entrypoint = entrypoint.relative_to(location)
+
     requirements = [
         path.relative_to(location) if path.is_absolute() else path
         for path in requirements
@@ -455,7 +470,7 @@ def build_image(
         or info.get("python", {}) != python_hashes
         or info.get("constraint", {}) != constraint_hashes
     )
-    update_files = info.get("files", {}) != file_hashes
+    update_files = info.get("files", {}) != file_hashes or info.get("ports") != ports
 
     docker.verify_running()
 
@@ -537,13 +552,15 @@ def build_image(
             if lambda_id:
                 docker.delete_image(lambda_image)
 
-            if relative_files:
+            if relative_files or entrypoint:
                 lambda_docker_file = directory / "DockerFile"
                 docker.build_lambda_docker_file(
                     lambda_docker_file,
                     python_image,
                     relative_files,
                     relative_directories,
+                    entrypoint=entrypoint,
+                    ports=ports,
                 )
                 lambda_id = docker.build_image(
                     lambda_image,
