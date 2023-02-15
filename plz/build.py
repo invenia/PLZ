@@ -486,7 +486,7 @@ def build_image(
         lambda_id = docker.get_image(lambda_image)
 
         if rebuild_system or not system_id:
-            system_docker_file = directory / "SystemDockerFile"
+            system_docker_file = directory / "SystemDockerfile"
             docker.build_system_docker_file(
                 system_docker_file, system_packages, python_version
             )
@@ -526,7 +526,7 @@ def build_image(
                 else:
                     pipconf = None
 
-                python_docker_file = directory / "PythonDockerFile"
+                python_docker_file = directory / "PythonDockerfile"
                 docker.build_python_docker_file(
                     python_docker_file,
                     system_image,
@@ -553,7 +553,7 @@ def build_image(
                 docker.delete_image(lambda_image)
 
             if relative_files or entrypoint:
-                lambda_docker_file = directory / "DockerFile"
+                lambda_docker_file = directory / "Dockerfile"
                 docker.build_lambda_docker_file(
                     lambda_docker_file,
                     python_image,
